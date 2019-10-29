@@ -34,6 +34,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.crypto.Crypto;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
@@ -42,12 +43,15 @@ public class TestReadOnlyIndex extends LuceneTestCase {
   private static final String longTerm = "longtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongtermlongterm";
   private static final String text = "This is the text to be indexed. " + longTerm;
 
-  private static Path indexPath;  
+  private static Path indexPath;
 
   @BeforeClass
   public static void buildIndex() throws Exception {
+    // This test is run with restricted permissions. Can not use encryption
+    Crypto.setEncryptionOn(false);
+
     indexPath = Files.createTempDirectory("readonlyindex").toAbsolutePath();
-    
+
     // borrows from TestDemo, but not important to keep in sync with demo
     Analyzer analyzer = new MockAnalyzer(random());
     Directory directory = newFSDirectory(indexPath);
@@ -59,12 +63,13 @@ public class TestReadOnlyIndex extends LuceneTestCase {
     directory.close();
     analyzer.close();
   }
-  
+
   @AfterClass
   public static void afterClass() throws Exception {
     indexPath = null;
   }
-  
+
+
   public void testReadOnlyIndex() throws Exception {
     runWithRestrictedPermissions(this::doTestReadOnlyIndex,
         // add some basic permissions (because we are limited already - so we grant all important ones):
@@ -75,12 +80,12 @@ public class TestReadOnlyIndex extends LuceneTestCase {
         new FilePermission(indexPath.resolve("-").toString(), "read")
     );
   }
-  
+
   private Void doTestReadOnlyIndex() throws Exception {
-    Directory dir = FSDirectory.open(indexPath); 
-    IndexReader ireader = DirectoryReader.open(dir); 
+    Directory dir = FSDirectory.open(indexPath);
+    IndexReader ireader = DirectoryReader.open(dir);
     IndexSearcher isearcher = newSearcher(ireader);
-    
+
     // borrows from TestDemo, but not important to keep in sync with demo
 
     assertEquals(1, isearcher.count(new TermQuery(new Term("fieldname", longTerm))));
@@ -100,5 +105,5 @@ public class TestReadOnlyIndex extends LuceneTestCase {
     ireader.close();
     return null; // void
   }
-  
+
 }

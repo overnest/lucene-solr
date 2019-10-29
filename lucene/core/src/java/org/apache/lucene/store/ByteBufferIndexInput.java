@@ -17,10 +17,20 @@
 package org.apache.lucene.store;
 
 
+import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.security.GeneralSecurityException;
+import java.util.Arrays;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+
+import org.apache.commons.crypto.stream.CtrCryptoInputStream;
+import org.apache.lucene.util.crypto.Crypto;
 
 /**
  * Base IndexInput implementation that uses an array
@@ -38,13 +48,17 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   protected final long chunkSizeMask;
   protected final int chunkSizePower;
   protected final ByteBufferGuard guard;
-  
+
   protected ByteBuffer[] buffers;
   protected int curBufIndex = -1;
   protected ByteBuffer curBuf; // redundant for speed: buffers[curBufIndex]
 
   protected boolean isClone = false;
-  
+
+  protected boolean isMmap = false;
+  protected long sliceOffset = 0;
+
+
   public static ByteBufferIndexInput newInstance(String resourceDescription, ByteBuffer[] buffers, long length, int chunkSizePower, ByteBufferGuard guard) {
     if (buffers.length == 1) {
       return new SingleBufferImpl(resourceDescription, buffers[0], length, chunkSizePower, guard);
@@ -52,7 +66,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
       return new MultiBufferImpl(resourceDescription, buffers, 0, length, chunkSizePower, guard);
     }
   }
-  
+
   ByteBufferIndexInput(String resourceDescription, ByteBuffer[] buffers, long length, int chunkSizePower, ByteBufferGuard guard) {
     super(resourceDescription);
     this.buffers = buffers;
@@ -60,14 +74,110 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     this.chunkSizePower = chunkSizePower;
     this.chunkSizeMask = (1L << chunkSizePower) - 1L;
     this.guard = guard;
-    assert chunkSizePower >= 0 && chunkSizePower <= 30;   
+    this.isMmap = (resourceDescription != null && resourceDescription.contains("MMapIndexInput("));
+
+    assert chunkSizePower >= 0 && chunkSizePower <= 30;
     assert (length >>> chunkSizePower) < Integer.MAX_VALUE;
   }
-  
+
+  public CtrCryptoInputStream getCryptoInput(InputStream stream, long offset)
+      throws GeneralSecurityException, IOException {
+    SecretKey key = Crypto.GetAesKey();
+    IvParameterSpec iv = Crypto.GetAesIV();
+    if (!Crypto.isEncryptionOn() || key == null || iv == null) {
+      return null;
+    }
+    return Crypto.GetCtrCryptoInputStream(stream, key.getEncoded(), iv.getIV(), offset + sliceOffset);
+  }
+
+  public byte decryptByte(byte b, long pos) throws GeneralSecurityException, IOException {
+    if (isMmap) {
+      CtrCryptoInputStream crypto = getCryptoInput(new ByteArrayInputStream(new byte[]{b}), pos);
+      if (crypto != null) {
+        byte[] bytes = crypto.readAllBytes();
+        return bytes[0];
+      }
+    }
+    return b;
+  }
+
+  public void decryptBytes(byte[] b, int offset, int len, long pos) throws GeneralSecurityException, IOException {
+    if (isMmap) {
+      CtrCryptoInputStream crypto = getCryptoInput(new ByteArrayInputStream(Arrays.copyOfRange(b, offset, offset+len)), pos);
+      if (crypto != null) {
+        byte[] bytes = crypto.readAllBytes();
+        System.arraycopy(bytes, 0, b, offset, len);
+      }
+    }
+  }
+
+  public short decryptShort(short s, long pos) throws GeneralSecurityException, IOException {
+    if (isMmap) {
+      byte[] bytes = new byte[] {
+          (byte) (s >> 8 & 0xFF),
+          (byte) (s & 0xFF)};
+
+      decryptBytes(bytes, 0, bytes.length, pos);
+
+      return (short) (
+          ((short)bytes[0] & 0xFF) << 8 |
+          ((short)bytes[1] & 0xFF));
+    }
+
+    return s;
+  }
+
+  public int decryptInt(int i, long pos) throws GeneralSecurityException, IOException {
+    if (isMmap) {
+      byte[] bytes = new byte[] {
+          (byte) (i >> 24 & 0xFF),
+          (byte) (i >> 16 & 0xFF),
+          (byte) (i >> 8 & 0xFF),
+          (byte) (i & 0xFF)};
+
+      decryptBytes(bytes, 0, bytes.length, pos);
+
+      return (int) (
+          ((int)bytes[0] & 0xFF) << 24 |
+          ((int)bytes[1] & 0xFF) << 16 |
+          ((int)bytes[2] & 0xFF) << 8 |
+          ((int)bytes[3] & 0xFF));
+    }
+    return i;
+  }
+
+  public long decryptLong(long l, long pos) throws GeneralSecurityException, IOException {
+    if (isMmap) {
+      byte[] bytes = new byte[] {
+          (byte) (l >> 56 & 0xFF),
+          (byte) (l >> 48 & 0xFF),
+          (byte) (l >> 40 & 0xFF),
+          (byte) (l >> 32 & 0xFF),
+          (byte) (l >> 24 & 0xFF),
+          (byte) (l >> 16 & 0xFF),
+          (byte) (l >> 8 & 0xFF),
+          (byte) (l & 0xFF)};
+
+      decryptBytes(bytes, 0, bytes.length, pos);
+
+      return (long) (
+          ((long)bytes[0] & 0xFF) << 56 |
+          ((long)bytes[1] & 0xFF) << 48 |
+          ((long)bytes[2] & 0xFF) << 40 |
+          ((long)bytes[3] & 0xFF) << 32 |
+          ((long)bytes[4] & 0xFF) << 24 |
+          ((long)bytes[5] & 0xFF) << 16 |
+          ((long)bytes[6] & 0xFF) << 8 |
+          ((long)bytes[7] & 0xFF));
+    }
+    return l;
+  }
+
   @Override
   public final byte readByte() throws IOException {
+    long pos = getFilePointer();
     try {
-      return guard.getByte(curBuf);
+      return decryptByte(guard.getByte(curBuf), pos);
     } catch (BufferUnderflowException e) {
       do {
         curBufIndex++;
@@ -77,16 +187,26 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         curBuf = buffers[curBufIndex];
         curBuf.position(0);
       } while (!curBuf.hasRemaining());
-      return guard.getByte(curBuf);
+      try {
+        return decryptByte(guard.getByte(curBuf), pos);
+      } catch (GeneralSecurityException e1) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
   @Override
   public final void readBytes(byte[] b, int offset, int len) throws IOException {
+    long pos = getFilePointer();
+    int coff = offset;
+    int clen = len;
     try {
       guard.getBytes(curBuf, b, offset, len);
+      decryptBytes(b, offset, len, pos);
     } catch (BufferUnderflowException e) {
       int curAvail = curBuf.remaining();
       while (len > curAvail) {
@@ -102,44 +222,60 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         curAvail = curBuf.remaining();
       }
       guard.getBytes(curBuf, b, offset, len);
+      try {
+        decryptBytes(b, coff, clen, pos);
+      } catch (GeneralSecurityException e1) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
   @Override
   public final short readShort() throws IOException {
+    long pos = getFilePointer();
     try {
-      return guard.getShort(curBuf);
+      return decryptShort(guard.getShort(curBuf), pos);
     } catch (BufferUnderflowException e) {
       return super.readShort();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
   @Override
   public final int readInt() throws IOException {
+    long pos = getFilePointer();
     try {
-      return guard.getInt(curBuf);
+      return decryptInt(guard.getInt(curBuf), pos);
     } catch (BufferUnderflowException e) {
       return super.readInt();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
   @Override
   public final long readLong() throws IOException {
+    long pos = getFilePointer();
     try {
-      return guard.getLong(curBuf);
+      return decryptLong(guard.getLong(curBuf), pos);
     } catch (BufferUnderflowException e) {
       return super.readLong();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
-  
+
   @Override
   public long getFilePointer() {
     try {
@@ -170,21 +306,23 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
       throw new AlreadyClosedException("Already closed: " + this);
     }
   }
-  
+
   @Override
   public byte readByte(long pos) throws IOException {
     try {
       final int bi = (int) (pos >> chunkSizePower);
-      return guard.getByte(buffers[bi], (int) (pos & chunkSizeMask));
+      return decryptByte(guard.getByte(buffers[bi], (int) (pos & chunkSizeMask)), pos);
     } catch (IndexOutOfBoundsException ioobe) {
       throw new EOFException("seek past EOF: " + this);
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
-  
+
   // used only by random access methods to handle reads across boundaries
-  private void setPos(long pos, int bi) throws IOException {
+  protected void setPos(long pos, int bi) throws IOException {
     try {
       final ByteBuffer b = buffers[bi];
       b.position((int) (pos & chunkSizeMask));
@@ -201,13 +339,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   public short readShort(long pos) throws IOException {
     final int bi = (int) (pos >> chunkSizePower);
     try {
-      return guard.getShort(buffers[bi], (int) (pos & chunkSizeMask));
+      return decryptShort(guard.getShort(buffers[bi], (int) (pos & chunkSizeMask)), pos);
     } catch (IndexOutOfBoundsException ioobe) {
       // either it's a boundary, or read past EOF, fall back:
       setPos(pos, bi);
       return readShort();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
@@ -215,13 +355,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   public int readInt(long pos) throws IOException {
     final int bi = (int) (pos >> chunkSizePower);
     try {
-      return guard.getInt(buffers[bi], (int) (pos & chunkSizeMask));
+      return decryptInt(guard.getInt(buffers[bi], (int) (pos & chunkSizeMask)), pos);
     } catch (IndexOutOfBoundsException ioobe) {
       // either it's a boundary, or read past EOF, fall back:
       setPos(pos, bi);
       return readInt();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
@@ -229,13 +371,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   public long readLong(long pos) throws IOException {
     final int bi = (int) (pos >> chunkSizePower);
     try {
-      return guard.getLong(buffers[bi], (int) (pos & chunkSizeMask));
+      return decryptLong(guard.getLong(buffers[bi], (int) (pos & chunkSizeMask)), pos);
     } catch (IndexOutOfBoundsException ioobe) {
       // either it's a boundary, or read past EOF, fall back:
       setPos(pos, bi);
       return readLong();
     } catch (NullPointerException npe) {
       throw new AlreadyClosedException("Already closed: " + this);
+    } catch (GeneralSecurityException e) {
+      throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
     }
   }
 
@@ -252,19 +396,19 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     } catch(IOException ioe) {
       throw new AssertionError(ioe);
     }
-    
+
     return clone;
   }
-  
+
   /**
    * Creates a slice of this index input, with the given description, offset, and length. The slice is seeked to the beginning.
    */
   @Override
-  public final ByteBufferIndexInput slice(String sliceDescription, long offset, long length) {    
+  public final ByteBufferIndexInput slice(String sliceDescription, long offset, long length) {
     if (offset < 0 || length < 0 || offset+length > this.length) {
       throw new IllegalArgumentException("slice() " + sliceDescription + " out of bounds: offset=" + offset + ",length=" + length + ",fileLength="  + this.length + ": "  + this);
     }
-    
+
     return buildSlice(sliceDescription, offset, length);
   }
 
@@ -276,10 +420,11 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
 
     final ByteBuffer newBuffers[] = buildSlice(buffers, offset, length);
     final int ofs = (int) (offset & chunkSizeMask);
-    
+
     final ByteBufferIndexInput clone = newCloneInstance(getFullSliceDescription(sliceDescription), newBuffers, ofs, length);
     clone.isClone = true;
-    
+    clone.sliceOffset = this.sliceOffset + offset;
+
     return clone;
   }
 
@@ -293,26 +438,26 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
       return new MultiBufferImpl(newResourceDescription, newBuffers, offset, length, chunkSizePower, guard);
     }
   }
-  
-  /** Returns a sliced view from a set of already-existing buffers: 
+
+  /** Returns a sliced view from a set of already-existing buffers:
    *  the last buffer's limit() will be correct, but
    *  you must deal with offset separately (the first buffer will not be adjusted) */
   private ByteBuffer[] buildSlice(ByteBuffer[] buffers, long offset, long length) {
     final long sliceEnd = offset + length;
-    
+
     final int startIndex = (int) (offset >>> chunkSizePower);
     final int endIndex = (int) (sliceEnd >>> chunkSizePower);
 
     // we always allocate one more slice, the last one may be a 0 byte one
     final ByteBuffer slices[] = new ByteBuffer[endIndex - startIndex + 1];
-    
+
     for (int i = 0; i < slices.length; i++) {
       slices[i] = buffers[startIndex + i].duplicate();
     }
 
     // set the last buffer's limit for the sliced view.
     slices[slices.length - 1].limit((int) (sliceEnd & chunkSizeMask));
-    
+
     return slices;
   }
 
@@ -320,20 +465,20 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   public final void close() throws IOException {
     try {
       if (buffers == null) return;
-      
+
       // make local copy, then un-set early
       final ByteBuffer[] bufs = buffers;
       unsetBuffers();
-      
+
       if (isClone) return;
-      
+
       // tell the guard to invalidate and later unmap the bytebuffers (if supported):
       guard.invalidateAndUnmap(bufs);
     } finally {
       unsetBuffers();
     }
   }
-  
+
   /**
    * Called to remove all references to byte buffers, so we can throw AlreadyClosed on NPE.
    */
@@ -342,7 +487,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     curBuf = null;
     curBufIndex = 0;
   }
-  
+
   /** Optimization of ByteBufferIndexInput for when there is only one buffer */
   static final class SingleBufferImpl extends ByteBufferIndexInput {
 
@@ -352,9 +497,9 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
       this.curBuf = buffer;
       buffer.position(0);
     }
-    
+
     // TODO: investigate optimizing readByte() & Co?
-    
+
     @Override
     public void seek(long pos) throws IOException {
       try {
@@ -369,7 +514,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         throw new AlreadyClosedException("Already closed: " + this);
       }
     }
-    
+
     @Override
     public long getFilePointer() {
       try {
@@ -382,7 +527,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     @Override
     public byte readByte(long pos) throws IOException {
       try {
-        return guard.getByte(curBuf, (int) pos);
+        return decryptByte(guard.getByte(curBuf, (int) pos), pos);
       } catch (IllegalArgumentException e) {
         if (pos < 0) {
           throw new IllegalArgumentException("Seeking to negative position: " + this, e);
@@ -391,13 +536,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         }
       } catch (NullPointerException npe) {
         throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
       }
     }
 
     @Override
     public short readShort(long pos) throws IOException {
       try {
-        return guard.getShort(curBuf, (int) pos);
+        return decryptShort(guard.getShort(curBuf, (int) pos), pos);
       } catch (IllegalArgumentException e) {
         if (pos < 0) {
           throw new IllegalArgumentException("Seeking to negative position: " + this, e);
@@ -406,13 +553,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         }
       } catch (NullPointerException npe) {
         throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
       }
     }
 
     @Override
     public int readInt(long pos) throws IOException {
       try {
-        return guard.getInt(curBuf, (int) pos);
+        return decryptInt(guard.getInt(curBuf, (int) pos), pos);
       } catch (IllegalArgumentException e) {
         if (pos < 0) {
           throw new IllegalArgumentException("Seeking to negative position: " + this, e);
@@ -421,13 +570,15 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         }
       } catch (NullPointerException npe) {
         throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
       }
     }
 
     @Override
     public long readLong(long pos) throws IOException {
       try {
-        return guard.getLong(curBuf, (int) pos);
+        return decryptLong(guard.getLong(curBuf, (int) pos), pos);
       } catch (IllegalArgumentException e) {
         if (pos < 0) {
           throw new IllegalArgumentException("Seeking to negative position: " + this, e);
@@ -436,14 +587,16 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         }
       } catch (NullPointerException npe) {
         throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
       }
     }
   }
-  
+
   /** This class adds offset support to ByteBufferIndexInput, which is needed for slices. */
   static final class MultiBufferImpl extends ByteBufferIndexInput {
     private final int offset;
-    
+
     MultiBufferImpl(String resourceDescription, ByteBuffer[] buffers, int offset, long length, int chunkSizePower,
         ByteBufferGuard guard) {
       super(resourceDescription, buffers, length, chunkSizePower, guard);
@@ -454,41 +607,113 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
         throw new AssertionError(ioe);
       }
     }
-    
+
     @Override
     public void seek(long pos) throws IOException {
       assert pos >= 0L;
       super.seek(pos + offset);
     }
-    
+
     @Override
     public long getFilePointer() {
       return super.getFilePointer() - offset;
     }
-    
+
+    private byte readBytePriv(long pos) throws IOException {
+      try {
+        final int bi = (int) (pos >> chunkSizePower);
+        return decryptByte(guard.getByte(buffers[bi], (int) (pos & chunkSizeMask)), pos-offset);
+      } catch (IndexOutOfBoundsException ioobe) {
+        throw new EOFException("seek past EOF: " + this);
+      } catch (NullPointerException npe) {
+        throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
+    }
+
     @Override
     public byte readByte(long pos) throws IOException {
-      return super.readByte(pos + offset);
+      return readBytePriv(pos + offset);
+    }
+
+    private short readShortPriv(long pos) throws IOException {
+      final int bi = (int) (pos >> chunkSizePower);
+      try {
+        return decryptShort(guard.getShort(buffers[bi], (int) (pos & chunkSizeMask)), pos-offset);
+      } catch (IndexOutOfBoundsException ioobe) {
+        // either it's a boundary, or read past EOF, fall back:
+        setPos(pos, bi);
+        return readShort();
+      } catch (NullPointerException npe) {
+        throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
     }
 
     @Override
     public short readShort(long pos) throws IOException {
-      return super.readShort(pos + offset);
+      return readShortPriv(pos + offset);
+    }
+
+    private int readIntPriv(long pos) throws IOException {
+      final int bi = (int) (pos >> chunkSizePower);
+      try {
+        return decryptInt(guard.getInt(buffers[bi], (int) (pos & chunkSizeMask)), pos-offset);
+      } catch (IndexOutOfBoundsException ioobe) {
+        // either it's a boundary, or read past EOF, fall back:
+        setPos(pos, bi);
+        return readInt();
+      } catch (NullPointerException npe) {
+        throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
     }
 
     @Override
     public int readInt(long pos) throws IOException {
-      return super.readInt(pos + offset);
+      return readIntPriv(pos + offset);
+    }
+
+    private long readLongPriv(long pos) throws IOException {
+      final int bi = (int) (pos >> chunkSizePower);
+      try {
+        return decryptLong(guard.getLong(buffers[bi], (int) (pos & chunkSizeMask)), pos-offset);
+      } catch (IndexOutOfBoundsException ioobe) {
+        // either it's a boundary, or read past EOF, fall back:
+        setPos(pos, bi);
+        return readLong();
+      } catch (NullPointerException npe) {
+        throw new AlreadyClosedException("Already closed: " + this);
+      } catch (GeneralSecurityException e) {
+        throw new AlreadyClosedException("Can not decrypt. Already closed: " + this);
+      }
     }
 
     @Override
     public long readLong(long pos) throws IOException {
-      return super.readLong(pos + offset);
+      return readLongPriv(pos + offset);
     }
 
     @Override
     protected ByteBufferIndexInput buildSlice(String sliceDescription, long ofs, long length) {
-      return super.buildSlice(sliceDescription, this.offset + ofs, length);
+      if (buffers == null) {
+        throw new AlreadyClosedException("Already closed: " + this);
+      }
+
+      long noffset = this.offset + ofs;
+      final ByteBuffer newBuffers[] = super.buildSlice(buffers, noffset, length);
+      final int nofs = (int) (noffset & chunkSizeMask);
+
+      final ByteBufferIndexInput clone = newCloneInstance(getFullSliceDescription(sliceDescription), newBuffers, nofs, length);
+      clone.isClone = true;
+      clone.sliceOffset = this.sliceOffset + ofs;
+
+      return clone;
+
+      //return super.buildSlice(sliceDescription, this.offset + ofs, length);
     }
   }
 }

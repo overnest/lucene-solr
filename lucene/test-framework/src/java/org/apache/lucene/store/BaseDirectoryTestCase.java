@@ -589,7 +589,6 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
 
       // copy from test -> test2
       final IndexInput in = dir.openInput("test", newIOContext(random()));
-
       out = dir.createOutput("test2", newIOContext(random()));
 
       upto = 0;
@@ -722,7 +721,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       assertEquals(fileCount, fsdir.listAll().length);
     }
   }
-  
+
   // random access APIs
   public void testRandomLong() throws Exception {
     try (Directory dir = getDirectory(createTempDir("testLongs"))) {
@@ -772,7 +771,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       input.close();
     }
   }
-  
+
   public void testRandomInt() throws Exception {
     try (Directory dir = getDirectory(createTempDir("testInts"))) {
       IndexOutput output = dir.createOutput("ints", newIOContext(random()));
@@ -820,7 +819,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       input.close();
     }
   }
-  
+
   public void testRandomShort() throws Exception {
     try (Directory dir = getDirectory(createTempDir("testShorts"))) {
       IndexOutput output = dir.createOutput("shorts", newIOContext(random()));
@@ -868,7 +867,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       input.close();
     }
   }
-  
+
   public void testRandomByte() throws Exception {
     try (Directory dir = getDirectory(createTempDir("testBytes"))) {
       IndexOutput output = dir.createOutput("bytes", newIOContext(random()));
@@ -916,7 +915,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       input.close();
     }
   }
-  
+
   /** try to stress slices of slices */
   public void testSliceOfSlice() throws Exception {
     try (Directory dir = getDirectory(createTempDir("sliceOfSlice"))) {
@@ -968,8 +967,8 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       input.close();
     }
   }
-  
-  /** 
+
+  /**
    * This test that writes larger than the size of the buffer output
    * will correctly increment the file pointer.
    */
@@ -999,7 +998,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       out.close();
     }
   }
-  
+
   public void testDoubleCloseOutput() throws Throwable {
     try (Directory dir = getDirectory(createTempDir())) {
       IndexOutput out = dir.createOutput("foobar", newIOContext(random()));
@@ -1008,7 +1007,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       out.close(); // close again
     }
   }
-  
+
   public void testDoubleCloseInput() throws Throwable {
     try (Directory dir = getDirectory(createTempDir())) {
       IndexOutput out = dir.createOutput("foobar", newIOContext(random()));
@@ -1089,7 +1088,7 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       try (IndexInput in = dir.openInput("a", IOContext.DEFAULT)) {
         in.seek(100);
         assertEquals(100, in.getFilePointer());
-        expectThrows(EOFException.class, () -> {      
+        expectThrows(EOFException.class, () -> {
           in.seek(1025);
         });
       }
@@ -1122,22 +1121,22 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
       assertFalse(Arrays.asList(fsDir.listAll()).contains(fileName));
 
       // Make sure fileLength claims it's deleted:
-      expectThrows(NoSuchFileException.class, () -> {      
+      expectThrows(NoSuchFileException.class, () -> {
         fsDir.fileLength(fileName);
       });
 
       // Make sure rename fails:
-      expectThrows(NoSuchFileException.class, () -> {      
+      expectThrows(NoSuchFileException.class, () -> {
         fsDir.rename(fileName, "file2");
       });
 
       // Make sure delete fails:
-      expectThrows(NoSuchFileException.class, () -> {      
+      expectThrows(NoSuchFileException.class, () -> {
         fsDir.deleteFile(fileName);
       });
 
       // Make sure we cannot open it for reading:
-      expectThrows(NoSuchFileException.class, () -> {      
+      expectThrows(NoSuchFileException.class, () -> {
         fsDir.openInput(fileName, IOContext.DEFAULT);
       });
     }

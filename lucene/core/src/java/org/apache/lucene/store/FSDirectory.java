@@ -46,7 +46,7 @@ import org.apache.lucene.util.IOUtils;
 
 /**
  * Base class for Directory implementations that store index
- * files in the file system.  
+ * files in the file system.
  * <a name="subclasses"></a>
  * There are currently three core
  * subclasses:
@@ -71,7 +71,7 @@ import org.apache.lucene.util.IOUtils;
  *       {@link Future#cancel(boolean)} should use
  *       {@code RAFDirectory} instead. See {@link NIOFSDirectory} java doc
  *       for details.
- *        
+ *
  *  <li>{@link MMapDirectory} uses memory-mapped IO when
  *       reading. This is a good choice if you have plenty
  *       of virtual memory relative to your index size, eg
@@ -138,7 +138,7 @@ public abstract class FSDirectory extends BaseDirectory {
 
   /** Create a new FSDirectory for the named location (ctor for subclasses).
    * The directory is created at the named location if it does not yet exist.
-   * 
+   *
    * <p>{@code FSDirectory} resolves the given Path to a canonical /
    * real path to ensure it can correctly lock the index directory and no other process
    * can interfere with changing possible symlinks to the index directory inbetween.
@@ -162,7 +162,7 @@ public abstract class FSDirectory extends BaseDirectory {
    *  best implementation given the current environment.
    *  The directory returned uses the {@link NativeFSLockFactory}.
    *  The directory is created at the named location if it does not yet exist.
-   * 
+   *
    * <p>{@code FSDirectory} resolves the given Path when calling this method to a canonical /
    * real path to ensure it can correctly lock the index directory and no other process
    * can interfere with changing possible symlinks to the index directory inbetween.
@@ -210,7 +210,7 @@ public abstract class FSDirectory extends BaseDirectory {
 
   private static String[] listAll(Path dir, Set<String> skipNames) throws IOException {
     List<String> entries = new ArrayList<>();
-    
+
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
       for (Path path : stream) {
         String name = path.getFileName().toString();
@@ -219,7 +219,7 @@ public abstract class FSDirectory extends BaseDirectory {
         }
       }
     }
-    
+
     String[] array = entries.toArray(new String[entries.size()]);
     // Directory.listAll javadocs state that we sort the results here, so we don't let filesystem
     // specifics leak out of this abstraction:
@@ -332,7 +332,7 @@ public abstract class FSDirectory extends BaseDirectory {
   }
 
   @Override
-  public void deleteFile(String name) throws IOException {  
+  public void deleteFile(String name) throws IOException {
     if (pendingDeletes.contains(name)) {
       throw new NoSuchFileException("file \"" + name + "\" is already pending delete");
     }
@@ -401,13 +401,14 @@ public abstract class FSDirectory extends BaseDirectory {
      * a native buffer outside of stack if the write buffer size is larger.
      */
     static final int CHUNK_SIZE = 8192;
-    
+
     public FSIndexOutput(String name) throws IOException {
       this(name, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
     }
 
     FSIndexOutput(String name, OpenOption... options) throws IOException {
-      super("FSIndexOutput(path=\"" + directory.resolve(name) + "\")", name, new FilterOutputStream(Files.newOutputStream(directory.resolve(name), options)) {
+      super("FSIndexOutput(path=\"" + directory.resolve(name) + "\")", name,
+          new FilterOutputStream(Files.newOutputStream(directory.resolve(name), options)) {
         // This implementation ensures, that we never write more than CHUNK_SIZE bytes:
         @Override
         public void write(byte[] b, int offset, int length) throws IOException {

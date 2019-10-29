@@ -20,7 +20,6 @@
   <description>
     Codecs for older versions of Lucene.
   </description>
-
   <import file="../module-build.xml"/>
 
 </project>

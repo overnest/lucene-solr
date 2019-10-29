@@ -25,10 +25,19 @@ import java.nio.channels.ClosedChannelException; // javadoc @link
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.GeneralSecurityException;
 import java.util.concurrent.Future;
 
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+
+import org.apache.commons.crypto.stream.CtrCryptoInputStream;
+import org.apache.lucene.util.crypto.Crypto;
+
+import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
+
 /** A straightforward implementation of {@link FSDirectory}
- *  using {@link Files#newByteChannel(Path, java.nio.file.OpenOption...)}.  
+ *  using {@link Files#newByteChannel(Path, java.nio.file.OpenOption...)}.
  *  However, this class has
  *  poor concurrent performance (multiple threads will
  *  bottleneck) as it synchronizes when multiple threads
@@ -46,7 +55,7 @@ import java.util.concurrent.Future;
  * </p>
  */
 public class SimpleFSDirectory extends FSDirectory {
-    
+
   /** Create a new SimpleFSDirectory for the named location.
    *  The directory is created at the named location if it does not yet exist.
    *
@@ -57,7 +66,7 @@ public class SimpleFSDirectory extends FSDirectory {
   public SimpleFSDirectory(Path path, LockFactory lockFactory) throws IOException {
     super(path, lockFactory);
   }
-  
+
   /** Create a new SimpleFSDirectory for the named location and {@link FSLockFactory#getDefault()}.
    *  The directory is created at the named location if it does not yet exist.
    *
@@ -86,7 +95,7 @@ public class SimpleFSDirectory extends FSDirectory {
      * The maximum chunk size for reads of 16384 bytes.
      */
     private static final int CHUNK_SIZE = 16384;
-    
+
     /** the channel we will read from */
     protected final SeekableByteChannel channel;
     /** is this instance a clone and hence does not own the file to close it */
@@ -95,16 +104,16 @@ public class SimpleFSDirectory extends FSDirectory {
     protected final long off;
     /** end offset (start+length) */
     protected final long end;
-    
+
     private ByteBuffer byteBuf; // wraps the buffer for NIO
 
     public SimpleFSIndexInput(String resourceDesc, SeekableByteChannel channel, IOContext context) throws IOException {
       super(resourceDesc, context);
-      this.channel = channel; 
+      this.channel = channel;
       this.off = 0L;
       this.end = channel.size();
     }
-    
+
     public SimpleFSIndexInput(String resourceDesc, SeekableByteChannel channel, long off, long length, int bufferSize) {
       super(resourceDesc, bufferSize);
       this.channel = channel;
@@ -112,21 +121,21 @@ public class SimpleFSDirectory extends FSDirectory {
       this.end = off + length;
       this.isClone = true;
     }
-    
+
     @Override
     public void close() throws IOException {
       if (!isClone) {
         channel.close();
       }
     }
-    
+
     @Override
     public SimpleFSIndexInput clone() {
       SimpleFSIndexInput clone = (SimpleFSIndexInput)super.clone();
       clone.isClone = true;
       return clone;
     }
-    
+
     @Override
     public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
       if (offset < 0 || length < 0 || offset + length > this.length()) {
@@ -160,13 +169,18 @@ public class SimpleFSDirectory extends FSDirectory {
         bb = ByteBuffer.wrap(b, offset, len);
       }
 
+      SecretKey key = Crypto.GetAesKey();
+      IvParameterSpec iv = Crypto.GetAesIV();
+      boolean encrypt = (Crypto.isEncryptionOn() && key != null && iv != null);
+
       synchronized(channel) {
+        CtrCryptoInputStream input = null;
         long pos = getFilePointer() + off;
-        
+
         if (pos + len > end) {
           throw new EOFException("read past EOF: " + this);
         }
-               
+
         try {
           channel.position(pos);
 
@@ -175,17 +189,49 @@ public class SimpleFSDirectory extends FSDirectory {
             final int toRead = Math.min(CHUNK_SIZE, readLength);
             bb.limit(bb.position() + toRead);
             assert bb.remaining() == toRead;
+
+            if (encrypt) {
+              bb.mark();
+            }
+
             final int i = channel.read(bb);
             if (i < 0) { // be defensive here, even though we checked before hand, something could have changed
               throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " pos: " + pos + " chunkLen: " + toRead + " end: " + end);
             }
             assert i > 0 : "SeekableByteChannel.read with non zero-length bb.remaining() must always read at least one byte (Channel is in blocking mode, see spec of ReadableByteChannel)";
+
+            if (encrypt) {
+              bb.reset();
+              bb.mark();
+              if (input != null) {
+                input.close();
+              }
+              input = Crypto.GetCtrCryptoInputStream(new ByteBufferBackedInputStream(bb),
+                  key.getEncoded(), iv.getIV(), pos);
+              byte[] buf = input.readNBytes(i);
+              input.close();
+              input = null;
+              assert buf.length == i : "Read " + i + " bytes from channel, but only decrypted " + buf.length + " bytes";
+              bb.reset();
+              bb.put(buf);
+            }
+
             pos += i;
             readLength -= i;
           }
           assert readLength == 0;
         } catch (IOException ioe) {
           throw new IOException(ioe.getMessage() + ": " + this, ioe);
+        } catch (GeneralSecurityException e) {
+          throw new IOException(e.getMessage() + ": " + this, e);
+        } finally {
+          try {
+            if (input != null) {
+              input.close();
+            }
+          } catch(Exception e) {
+            // Noop
+          }
         }
       }
     }
