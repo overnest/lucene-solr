@@ -42,7 +42,6 @@ import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 
 public final class Crypto {
 
-
   private static SecureRandom rand = null;
   public static String AES_ALGORITHM = "AES";
   public static int AES_KEY_SIZE = 256;
@@ -97,7 +96,7 @@ public final class Crypto {
 
   public static SecureRandom GetSecureRandom() throws NoSuchAlgorithmException {
     if (rand == null) {
-      synchronized(Crypto.class) {
+      synchronized (Crypto.class) {
         if (rand == null) {
           rand = SecureRandom.getInstance("NativePRNG");
         }
@@ -128,17 +127,6 @@ public final class Crypto {
     return plaintext;
   }
 
-  public static byte[] DecryptAesCtr(SecretKey key, IvParameterSpec iv, byte[] ciphertext)
-      throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException, NoSuchAlgorithmException,
-      NoSuchPaddingException, InvalidAlgorithmParameterException {
-    if (isEncryptionOn()) {
-      Cipher cipher = Cipher.getInstance(CTR_TRANSFORM);
-      cipher.init(Cipher.DECRYPT_MODE, key, iv);
-      return cipher.doFinal(ciphertext);
-    }
-    return ciphertext;
-  }
-
   public static CtrCryptoInputStream GetCtrCryptoInputStream(InputStream stream, byte[] key, byte[] iv)
       throws GeneralSecurityException, IOException {
     Security.setProperty("crypto.policy", "unlimited");
@@ -151,5 +139,8 @@ public final class Crypto {
     return new CtrCryptoInputStream(new Properties(), stream, key, iv, offset);
   }
 
-
+  public static CtrCipher getCtrDecryptCipher(SecretKey key, IvParameterSpec iv) throws IOException {
+    return new CtrCipher(key, iv);
+  }
+  
 }

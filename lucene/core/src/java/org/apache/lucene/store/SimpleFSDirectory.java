@@ -20,21 +20,15 @@ package org.apache.lucene.store;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.SeekableByteChannel;
 import java.nio.channels.ClosedChannelException; // javadoc @link
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.security.GeneralSecurityException;
 import java.util.concurrent.Future;
 
-import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
-
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.crypto.Crypto;
-
-import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
+import org.apache.lucene.util.crypto.CtrCipher;
 
 /** A straightforward implementation of {@link FSDirectory}
  *  using {@link Files#newByteChannel(Path, java.nio.file.OpenOption...)}.
@@ -169,16 +163,16 @@ public class SimpleFSDirectory extends FSDirectory {
         bb = ByteBuffer.wrap(b, offset, len);
       }
 
-      SecretKey key = Crypto.GetAesKey();
-      IvParameterSpec iv = Crypto.GetAesIV();
-      boolean encrypt = (Crypto.isEncryptionOn() && key != null && iv != null);
-
       synchronized(channel) {
-        CtrCryptoInputStream input = null;
         long pos = getFilePointer() + off;
 
         if (pos + len > end) {
           throw new EOFException("read past EOF: " + this);
+        }
+        
+        CtrCipher cipher = null;
+        if (Crypto.isEncryptionOn()) {
+          cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());        
         }
 
         try {
@@ -190,7 +184,7 @@ public class SimpleFSDirectory extends FSDirectory {
             bb.limit(bb.position() + toRead);
             assert bb.remaining() == toRead;
 
-            if (encrypt) {
+            if (cipher != null) {
               bb.mark();
             }
 
@@ -200,20 +194,12 @@ public class SimpleFSDirectory extends FSDirectory {
             }
             assert i > 0 : "SeekableByteChannel.read with non zero-length bb.remaining() must always read at least one byte (Channel is in blocking mode, see spec of ReadableByteChannel)";
 
-            if (encrypt) {
+            if (cipher != null) {
               bb.reset();
-              bb.mark();
-              if (input != null) {
-                input.close();
-              }
-              input = Crypto.GetCtrCryptoInputStream(new ByteBufferBackedInputStream(bb),
-                  key.getEncoded(), iv.getIV(), pos);
-              byte[] buf = input.readNBytes(i);
-              input.close();
-              input = null;
-              assert buf.length == i : "Read " + i + " bytes from channel, but only decrypted " + buf.length + " bytes";
+              byte[] decrypted = cipher.decrypt(bb, pos);
+              assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
               bb.reset();
-              bb.put(buf);
+              bb.put(decrypted);
             }
 
             pos += i;
@@ -222,16 +208,6 @@ public class SimpleFSDirectory extends FSDirectory {
           assert readLength == 0;
         } catch (IOException ioe) {
           throw new IOException(ioe.getMessage() + ": " + this, ioe);
-        } catch (GeneralSecurityException e) {
-          throw new IOException(e.getMessage() + ": " + this, e);
-        } finally {
-          try {
-            if (input != null) {
-              input.close();
-            }
-          } catch(Exception e) {
-            // Noop
-          }
         }
       }
     }
