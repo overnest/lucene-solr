@@ -19,6 +19,7 @@ package org.apache.lucene.util.crypto;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Base64;
 
 import javax.crypto.SecretKey;
@@ -30,10 +31,10 @@ import org.apache.lucene.util.LuceneTestCase;
 
 import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
 
+public class TestCrypto extends LuceneTestCase {
 
-public class TestCrytpto extends LuceneTestCase {
-
-  public static String plaintext = "Before the widespread use of message authentication codes and authenticated encryption, " +
+  public static String plaintext = "Before the widespread use of message authentication codes and authenticated encryption, "
+      +
       "it was common to discuss the \"error propagation\" properties as a selection criterion for " +
       "a mode of operation. It might be observed, for example, that a one-block error in the " +
       "transmitted ciphertext would result in a one-block error in the reconstructed plaintext " +
@@ -56,7 +57,6 @@ public class TestCrytpto extends LuceneTestCase {
       "and these are called AEAD (authenticated encryption with associated data) schemes. For example, " +
       "EAX mode is a double-pass AEAD scheme while OCB mode is single-pass.";
 
-
   public void testGenerateAesKey() throws NoSuchAlgorithmException {
     SecretKey key = Crypto.GenerateAesKey();
     String base64 = Base64.getEncoder().encodeToString(key.getEncoded());
@@ -69,7 +69,6 @@ public class TestCrytpto extends LuceneTestCase {
     System.out.println("AES IV: " + base64);
   }
 
-
   public void testPositionCryptoRead() throws Exception {
     assertFalse(false);
 
@@ -80,12 +79,11 @@ public class TestCrytpto extends LuceneTestCase {
     IvParameterSpec iv = Crypto.GenerateAesIV();
 
     byte[] ciphertext = Crypto.EncryptAesCtr(key, iv, plainbytes);
-    byte[] plaintext = Crypto.DecryptAesCtr(key, iv, ciphertext);
+    byte[] plaintext = Crypto.getCtrDecryptCipher(key, iv).decrypt(ciphertext);
 
     assertEquals(ciphertext.length, plaintext.length);
     assertEquals(ciphertext.length, plainbytes.length);
     assertArrayEquals(plainbytes, plaintext);
-
 
     byte[] b = new byte[210];
     int readLength = 100;
@@ -95,12 +93,13 @@ public class TestCrytpto extends LuceneTestCase {
     ByteBuffer bb = ByteBuffer.wrap(b, offset, readLength);
 
     CtrCryptoInputStream input = null;
+    CtrCipher cipher = Crypto.getCtrDecryptCipher(key, iv);
 
+    final int toRead = 13;
     try {
       channel.position(pos);
 
       while (readLength > 0) {
-        final int toRead = 13;
         bb.limit(bb.position() + toRead);
         assert bb.remaining() == toRead;
 
@@ -109,14 +108,34 @@ public class TestCrytpto extends LuceneTestCase {
         bb.reset();
         bb.mark();
 
+        byte[] plaintextChunk = Arrays.copyOfRange(plaintext, (int) pos, (int) pos + i);
+        
+        // decrypt using GetCtrCryptoInputStream
         ByteBufferBackedInputStream bbis = new ByteBufferBackedInputStream(bb);
         input = Crypto.GetCtrCryptoInputStream(bbis, key.getEncoded(), iv.getIV(), pos);
-        ByteBuffer buf = ByteBuffer.allocate(i);
-        int r = input.read(buf);
-        bb.reset();
-        bb.put(buf.rewind());
+        ByteBuffer streamedResultBuf = ByteBuffer.allocate(i);
+        int r = input.read(streamedResultBuf);
 
-        System.out.println("decrypt " + r + ": " + new String(buf.array()));
+        System.out.println("decrypt1 " + r + ": " + new String(streamedResultBuf.array()));
+        assertArrayEquals(plaintextChunk, streamedResultBuf.array());
+        bb.reset();
+
+        // decrypt using CtrCipher#decrypt (non-stream, bytes)
+        byte[] bytes = Arrays.copyOfRange(bb.array(), (int) pos, (int) pos + i);
+        byte[] resultBytes = cipher.decrypt(bytes, pos);
+        
+        System.out.println("decrypt2 " + resultBytes.length + ": " + new String(resultBytes));
+        assertArrayEquals(plaintextChunk, resultBytes);
+        bb.reset();
+        
+        // decrypt using CtrCipher#decrypt (non-stream, ByteBuffer)
+        byte[] resultBytes2 = cipher.decrypt(bb, pos);
+        
+        System.out.println("decrypt2 " + resultBytes2.length + ": " + new String(resultBytes2));
+        assertArrayEquals(plaintextChunk, resultBytes2);
+        bb.reset();
+
+        bb.put(streamedResultBuf.rewind());
 
         pos += i;
         readLength -= i;
@@ -129,7 +148,12 @@ public class TestCrytpto extends LuceneTestCase {
         if (input != null) {
           input.close();
         }
-      } catch(Exception e) {
+      } catch (Exception e) {
+        // Noop
+      }
+      try {
+        channel.close();
+      } catch (Exception e) {
         // Noop
       }
     }

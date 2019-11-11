@@ -16,20 +16,16 @@
  */
 package org.apache.lucene.store;
 
-import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Path;
-import java.security.GeneralSecurityException;
+import java.util.Arrays;
 
-import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
-
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.SuppressForbidden;
 import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.CtrCipher;
 
 /** A straightforward implementation of {@link FSDirectory}
  *  using java.io.RandomAccessFile.  However, this class has
@@ -153,10 +149,11 @@ public class RAFDirectory extends FSDirectory {
         if (position + len > end) {
           throw new EOFException("read past EOF: " + this);
         }
-
-        SecretKey key = Crypto.GetAesKey();
-        IvParameterSpec iv = Crypto.GetAesIV();
-        boolean encrypt = (Crypto.isEncryptionOn() && key != null && iv != null);
+        
+        CtrCipher cipher = null;
+        if (Crypto.isEncryptionOn()) {
+          cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());        
+        }
 
         try {
           while (total < len) {
@@ -167,14 +164,11 @@ public class RAFDirectory extends FSDirectory {
             }
             assert i > 0 : "RandomAccessFile.read with non zero-length toRead must always read at least one byte";
 
-            if (encrypt) {
-              CtrCryptoInputStream input = Crypto.GetCtrCryptoInputStream(
-                  new ByteArrayInputStream(b, offset + total, i),
-                  key.getEncoded(), iv.getIV(), position + total);
-              byte[] buf = input.readNBytes(i);
-              input.close();
-              assert buf.length == i : "Read " + i + " bytes from channel, but only decrypted " + buf.length + " bytes";
-              System.arraycopy(buf, 0, b, offset + total, i);
+            if (cipher != null) {
+              byte[] decrypted = cipher.decrypt(Arrays.copyOfRange(b, offset + total, offset + total + i), position + total);
+              
+              assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
+              System.arraycopy(decrypted, 0, b, offset + total, i);
             }
 
             total += i;
@@ -182,8 +176,6 @@ public class RAFDirectory extends FSDirectory {
           assert total == len;
         } catch (IOException ioe) {
           throw new IOException(ioe.getMessage() + ": " + this, ioe);
-        } catch (GeneralSecurityException e) {
-          throw new IOException(e.getMessage() + ": " + this, e);
         }
       }
     }

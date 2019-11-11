@@ -23,16 +23,10 @@ import java.nio.channels.ClosedChannelException; // javadoc @link
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.security.GeneralSecurityException;
 import java.util.concurrent.Future; // javadoc
 
-import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
-
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.crypto.Crypto;
-
-import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
+import org.apache.lucene.util.crypto.CtrCipher;
 
 /**
  * An {@link FSDirectory} implementation that uses java.nio's FileChannel's
@@ -110,7 +104,7 @@ public class NIOFSDirectory extends FSDirectory {
     protected final long end;
 
     private ByteBuffer byteBuf; // wraps the buffer for NIO
-
+    
     public NIOFSIndexInput(String resourceDesc, FileChannel fc, IOContext context) throws IOException {
       super(resourceDesc, context);
       this.channel = fc;
@@ -178,11 +172,11 @@ public class NIOFSDirectory extends FSDirectory {
       if (pos + len > end) {
         throw new EOFException("read past EOF: " + this);
       }
-
-      SecretKey key = Crypto.GetAesKey();
-      IvParameterSpec iv = Crypto.GetAesIV();
-      boolean encrypt = (Crypto.isEncryptionOn() && key != null && iv != null);
-      CtrCryptoInputStream input = null;
+      
+      CtrCipher cipher = null;
+      if (Crypto.isEncryptionOn()) {
+        cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());        
+      }
 
       try {
         int readLength = len;
@@ -191,7 +185,7 @@ public class NIOFSDirectory extends FSDirectory {
           bb.limit(bb.position() + toRead);
           assert bb.remaining() == toRead;
 
-          if (encrypt) {
+          if (cipher != null) {
             bb.mark();
           }
 
@@ -201,36 +195,20 @@ public class NIOFSDirectory extends FSDirectory {
           }
           assert i > 0 : "FileChannel.read with non zero-length bb.remaining() must always read at least one byte (FileChannel is in blocking mode, see spec of ReadableByteChannel)";
 
-          if (encrypt) {
+          if (cipher != null) {
             bb.reset();
-            bb.mark();
-            if (input != null) {
-              input.close();
-            }
-            input = Crypto.GetCtrCryptoInputStream(new ByteBufferBackedInputStream(bb),
-                key.getEncoded(), iv.getIV(), pos);
-            byte[] buf = input.readNBytes(i);
-            input.close();
-            input = null;
-            assert buf.length == i : "Read " + i + " bytes from channel, but only decrypted " + buf.length + " bytes";
+            byte[] decrypted = cipher.decrypt(bb, pos);
+            assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
             bb.reset();
-            bb.put(buf);
+            bb.put(decrypted);
           }
 
           pos += i;
           readLength -= i;
         }
         assert readLength == 0;
-      } catch (IOException | GeneralSecurityException ioe) {
+      } catch (IOException ioe) {
         throw new IOException(ioe.getMessage() + ": " + this, ioe);
-      }  finally {
-        try {
-          if (input != null) {
-            input.close();
-          }
-        } catch(Exception e) {
-          // Noop
-        }
       }
     }
 

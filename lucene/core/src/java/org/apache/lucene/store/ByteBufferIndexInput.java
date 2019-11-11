@@ -17,20 +17,15 @@
 package org.apache.lucene.store;
 
 
-import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 
-import javax.crypto.SecretKey;
-import javax.crypto.spec.IvParameterSpec;
-
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.CtrCipher;
 
 /**
  * Base IndexInput implementation that uses an array
@@ -54,10 +49,10 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   protected ByteBuffer curBuf; // redundant for speed: buffers[curBufIndex]
 
   protected boolean isClone = false;
-
-  protected boolean isMmap = false;
   protected long sliceOffset = 0;
 
+  protected final boolean isMmap;
+  protected final CtrCipher cipher;
 
   public static ByteBufferIndexInput newInstance(String resourceDescription, ByteBuffer[] buffers, long length, int chunkSizePower, ByteBufferGuard guard) {
     if (buffers.length == 1) {
@@ -75,39 +70,33 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     this.chunkSizeMask = (1L << chunkSizePower) - 1L;
     this.guard = guard;
     this.isMmap = (resourceDescription != null && resourceDescription.contains("MMapIndexInput("));
+    
+    if (this.isMmap && Crypto.isEncryptionOn()) {
+      try {
+        this.cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }      
+    } else {
+      this.cipher = null;
+    }
 
     assert chunkSizePower >= 0 && chunkSizePower <= 30;
     assert (length >>> chunkSizePower) < Integer.MAX_VALUE;
   }
 
-  public CtrCryptoInputStream getCryptoInput(InputStream stream, long offset)
-      throws GeneralSecurityException, IOException {
-    SecretKey key = Crypto.GetAesKey();
-    IvParameterSpec iv = Crypto.GetAesIV();
-    if (!Crypto.isEncryptionOn() || key == null || iv == null) {
-      return null;
-    }
-    return Crypto.GetCtrCryptoInputStream(stream, key.getEncoded(), iv.getIV(), offset + sliceOffset);
-  }
-
   public byte decryptByte(byte b, long pos) throws GeneralSecurityException, IOException {
-    if (isMmap) {
-      CtrCryptoInputStream crypto = getCryptoInput(new ByteArrayInputStream(new byte[]{b}), pos);
-      if (crypto != null) {
-        byte[] bytes = crypto.readAllBytes();
-        return bytes[0];
-      }
+    if (cipher != null) {
+      byte[] decrypted = cipher.decrypt(new byte[]{b}, pos + sliceOffset);
+      return decrypted[0];
     }
     return b;
   }
 
   public void decryptBytes(byte[] b, int offset, int len, long pos) throws GeneralSecurityException, IOException {
-    if (isMmap) {
-      CtrCryptoInputStream crypto = getCryptoInput(new ByteArrayInputStream(Arrays.copyOfRange(b, offset, offset+len)), pos);
-      if (crypto != null) {
-        byte[] bytes = crypto.readAllBytes();
-        System.arraycopy(bytes, 0, b, offset, len);
-      }
+    if (cipher != null) {
+      byte[] decrypted = cipher.decrypt(Arrays.copyOfRange(b, offset, offset + len), pos + sliceOffset);
+      System.arraycopy(decrypted, 0, b, offset, len);
     }
   }
 
@@ -137,7 +126,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
 
       decryptBytes(bytes, 0, bytes.length, pos);
 
-      return (int) (
+      return (
           ((int)bytes[0] & 0xFF) << 24 |
           ((int)bytes[1] & 0xFF) << 16 |
           ((int)bytes[2] & 0xFF) << 8 |
@@ -160,7 +149,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
 
       decryptBytes(bytes, 0, bytes.length, pos);
 
-      return (long) (
+      return (
           ((long)bytes[0] & 0xFF) << 56 |
           ((long)bytes[1] & 0xFF) << 48 |
           ((long)bytes[2] & 0xFF) << 40 |
