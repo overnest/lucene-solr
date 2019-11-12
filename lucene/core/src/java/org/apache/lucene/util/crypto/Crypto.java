@@ -45,7 +45,7 @@ public final class Crypto {
   private static SecureRandom rand = null;
   public static String AES_ALGORITHM = "AES";
   public static int AES_KEY_SIZE = 256;
-  public static int AES_IV_SIZE = 16;
+  public static int AES_BLOCK_SIZE = 16;
   public static String CTR_TRANSFORM = "AES/CTR/NoPadding";
 
   public static volatile AtomicBoolean encryptionOn = new AtomicBoolean(true);
@@ -89,7 +89,7 @@ public final class Crypto {
   }
 
   public static IvParameterSpec GenerateAesIV() throws NoSuchAlgorithmException {
-    byte[] iv = new byte[AES_IV_SIZE];
+    byte[] iv = new byte[AES_BLOCK_SIZE];
     GetSecureRandom().nextBytes(iv);
     return new IvParameterSpec(iv);
   }

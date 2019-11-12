@@ -18,6 +18,7 @@ package org.apache.lucene.util.crypto;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
@@ -33,7 +34,7 @@ import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
 
 public class TestCrypto extends LuceneTestCase {
 
-  public static String plaintext = "Before the widespread use of message authentication codes and authenticated encryption, "
+  public static final String plaintext = "Before the widespread use of message authentication codes and authenticated encryption, "
       +
       "it was common to discuss the \"error propagation\" properties as a selection criterion for " +
       "a mode of operation. It might be observed, for example, that a one-block error in the " +
@@ -41,18 +42,18 @@ public class TestCrypto extends LuceneTestCase {
       "for ECB mode encryption, while in CBC mode such an error would affect two blocks." +
       "Some felt that such resilience was desirable in the face of random errors (e.g., line " +
       "noise), while others argued that error correcting increased the scope for attackers to " +
-      "maliciously tamper with a message." +
+      "maliciously tamper with a message.\n" +
       "However, when proper integrity protection is used, such an error will result (with high " +
       "probability) in the entire message being rejected. If resistance to random error is " +
       "desirable, error-correcting codes should be applied to the ciphertext before transmission." +
-      "Authenticated encryption" +
-      "Main article: Authenticated encryption" +
+      "Authenticated encryption\n" +
+      "Main article: Authenticated encryption\n" +
       "A number of modes of operation have been designed to combine secrecy and authentication in " +
       "a single cryptographic primitive. Examples of such modes are XCBC,[25] IACBC, IAPM,[26] OCB, " +
       "EAX, CWC, CCM, and GCM. Authenticated encryption modes are classified as single-pass modes " +
       "or double-pass modes. Some single-pass authenticated encryption algorithms, such as OCB mode, " +
       "are encumbered by patents, while others were specifically designed and released in a way to " +
-      "avoid such encumberment." +
+      "avoid such encumberment.\n" +
       "In addition, some modes also allow for the authentication of unencrypted associated data, " +
       "and these are called AEAD (authenticated encryption with associated data) schemes. For example, " +
       "EAX mode is a double-pass AEAD scheme while OCB mode is single-pass.";
@@ -69,81 +70,97 @@ public class TestCrypto extends LuceneTestCase {
     System.out.println("AES IV: " + base64);
   }
 
+  public void testFullDecrypt() throws Exception {  
+    byte[] plainbytes = plaintext.getBytes();
+    
+    Crypto.Initialize();
+    SecretKey key = Crypto.GenerateAesKey();
+    IvParameterSpec iv = Crypto.GenerateAesIV();
+    
+    byte[] ciphertext = Crypto.EncryptAesCtr(key, iv, plainbytes);
+    byte[] plaintext = Crypto.getCtrDecryptCipher(key, iv).decrypt(ciphertext);
+    
+    assertEquals(ciphertext.length, plaintext.length);
+    assertEquals(ciphertext.length, plainbytes.length);
+    assertArrayEquals(plainbytes, plaintext);
+  }
+  
   public void testPositionCryptoRead() throws Exception {
-    assertFalse(false);
-
     byte[] plainbytes = plaintext.getBytes();
 
     Crypto.Initialize();
     SecretKey key = Crypto.GenerateAesKey();
     IvParameterSpec iv = Crypto.GenerateAesIV();
-
+    
     byte[] ciphertext = Crypto.EncryptAesCtr(key, iv, plainbytes);
-    byte[] plaintext = Crypto.getCtrDecryptCipher(key, iv).decrypt(ciphertext);
-
-    assertEquals(ciphertext.length, plaintext.length);
-    assertEquals(ciphertext.length, plainbytes.length);
-    assertArrayEquals(plainbytes, plaintext);
-
-    byte[] b = new byte[210];
-    int readLength = 100;
-    int offset = 0;
-    long pos = 0;
+   
+    final int totalLength = 100 + random().nextInt(plainbytes.length - 100);
+    
     SeekableInMemoryByteChannel channel = new SeekableInMemoryByteChannel(ciphertext);
-    ByteBuffer bb = ByteBuffer.wrap(b, offset, readLength);
+    
+    int chunkLength = 1 + random().nextInt(totalLength / 5);
+    
+    byte[] b = new byte[totalLength];
+    ByteBuffer bb = ByteBuffer.wrap(b);
+    
+    int readLength = totalLength;
+    long pos = 0;    
+    channel.position(pos);
 
     CtrCryptoInputStream input = null;
     CtrCipher cipher = Crypto.getCtrDecryptCipher(key, iv);
 
-    final int toRead = 13;
     try {
-      channel.position(pos);
-
       while (readLength > 0) {
-        bb.limit(bb.position() + toRead);
-        assert bb.remaining() == toRead;
+        bb.limit(bb.position() + Math.min(chunkLength, readLength));
+        assert bb.remaining() == Math.min(chunkLength, readLength);
 
         bb.mark();
-        final int i = channel.read(bb);
+        final int n = channel.read(bb);
         bb.reset();
-        bb.mark();
+        if (n == 0) {
+          break;
+        }
 
-        byte[] plaintextChunk = Arrays.copyOfRange(plaintext, (int) pos, (int) pos + i);
+        byte[] plaintextChunk = Arrays.copyOfRange(plainbytes, (int) pos, (int) pos + n);
         
         // decrypt using GetCtrCryptoInputStream
         ByteBufferBackedInputStream bbis = new ByteBufferBackedInputStream(bb);
         input = Crypto.GetCtrCryptoInputStream(bbis, key.getEncoded(), iv.getIV(), pos);
-        ByteBuffer streamedResultBuf = ByteBuffer.allocate(i);
+        ByteBuffer streamedResultBuf = ByteBuffer.allocate(n);
         int r = input.read(streamedResultBuf);
 
-        System.out.println("decrypt1 " + r + ": " + new String(streamedResultBuf.array()));
+        // System.out.println("decrypt1 " + r + ": " + new String(streamedResultBuf.array()));
         assertArrayEquals(plaintextChunk, streamedResultBuf.array());
         bb.reset();
 
         // decrypt using CtrCipher#decrypt (non-stream, bytes)
-        byte[] bytes = Arrays.copyOfRange(bb.array(), (int) pos, (int) pos + i);
+        byte[] bytes = Arrays.copyOfRange(bb.array(), (int) pos, (int) pos + n);
         byte[] resultBytes = cipher.decrypt(bytes, pos);
         
-        System.out.println("decrypt2 " + resultBytes.length + ": " + new String(resultBytes));
+        // System.out.println("decrypt2 " + resultBytes.length + ": " + new String(resultBytes));
         assertArrayEquals(plaintextChunk, resultBytes);
         bb.reset();
         
         // decrypt using CtrCipher#decrypt (non-stream, ByteBuffer)
         byte[] resultBytes2 = cipher.decrypt(bb, pos);
         
-        System.out.println("decrypt2 " + resultBytes2.length + ": " + new String(resultBytes2));
+        // System.out.println("decrypt3 " + resultBytes2.length + ": " + new String(resultBytes2));
         assertArrayEquals(plaintextChunk, resultBytes2);
         bb.reset();
 
         bb.put(streamedResultBuf.rewind());
 
-        pos += i;
-        readLength -= i;
+        pos += n;
+        readLength -= n;
       }
-      assert readLength <= 0;
-    } catch (IOException ioe) {
-      throw new IOException(ioe.getMessage() + ": " + this, ioe);
+      assert readLength == 0;
+    } catch (GeneralSecurityException e) {
+      throw new IOException(e.getMessage() + ": " + this, e);
     } finally {
+      // System.out.println(new String(bb.array()));
+      assertArrayEquals(Arrays.copyOfRange(plainbytes, 0, totalLength), bb.array());
+      
       try {
         if (input != null) {
           input.close();
@@ -157,8 +174,6 @@ public class TestCrypto extends LuceneTestCase {
         // Noop
       }
     }
-
-    System.out.println(new String(bb.array()));
   }
 
 }
