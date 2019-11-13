@@ -38,6 +38,8 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.LockFactory;
+import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.CtrCipher;
 import org.apache.solr.store.blockcache.CustomBufferedIndexInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -224,7 +226,14 @@ public class HdfsDirectory extends BaseDirectory {
     @Override
     protected void readInternal(byte[] b, int offset, int length)
         throws IOException {
-      inputStream.readFully(getFilePointer(), b, offset, length);
+      long pos = getFilePointer();
+      inputStream.readFully(pos, b, offset, length);
+
+      if (Crypto.isEncryptionOn()) {
+        CtrCipher cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());
+        byte[] decrypted = cipher.decrypt(Arrays.copyOfRange(b, offset, offset + length), pos);
+        System.arraycopy(decrypted, 0, b, offset, length);
+      }
     }
     
     @Override
