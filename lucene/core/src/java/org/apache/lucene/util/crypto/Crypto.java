@@ -18,15 +18,12 @@
 package org.apache.lucene.util.crypto;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.security.GeneralSecurityException;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.util.Base64;
-import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.BadPaddingException;
@@ -37,8 +34,6 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 
 public final class Crypto {
 
@@ -125,18 +120,6 @@ public final class Crypto {
       return cipher.doFinal(plaintext);
     }
     return plaintext;
-  }
-
-  public static CtrCryptoInputStream GetCtrCryptoInputStream(InputStream stream, byte[] key, byte[] iv)
-      throws GeneralSecurityException, IOException {
-    Security.setProperty("crypto.policy", "unlimited");
-    return new CtrCryptoInputStream(new Properties(), stream, key, iv, 0);
-  }
-
-  public static CtrCryptoInputStream GetCtrCryptoInputStream(InputStream stream, byte[] key, byte[] iv, long offset)
-      throws GeneralSecurityException, IOException {
-    Security.setProperty("crypto.policy", "unlimited");
-    return new CtrCryptoInputStream(new Properties(), stream, key, iv, offset);
   }
 
   public static CtrCipher getCtrDecryptCipher(SecretKey key, IvParameterSpec iv) throws IOException {

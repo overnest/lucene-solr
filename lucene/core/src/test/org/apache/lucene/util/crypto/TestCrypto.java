@@ -16,9 +16,7 @@
  */
 package org.apache.lucene.util.crypto;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
@@ -26,11 +24,7 @@ import java.util.Base64;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 
-import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.LuceneTestCase;
-
-import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
 
 public class TestCrypto extends LuceneTestCase {
 
@@ -107,7 +101,6 @@ public class TestCrypto extends LuceneTestCase {
     long pos = 0;    
     channel.position(pos);
 
-    CtrCryptoInputStream input = null;
     CtrCipher cipher = Crypto.getCtrDecryptCipher(key, iv);
 
     try {
@@ -123,16 +116,6 @@ public class TestCrypto extends LuceneTestCase {
         }
 
         byte[] plaintextChunk = Arrays.copyOfRange(plainbytes, (int) pos, (int) pos + n);
-        
-        // decrypt using GetCtrCryptoInputStream
-        ByteBufferBackedInputStream bbis = new ByteBufferBackedInputStream(bb);
-        input = Crypto.GetCtrCryptoInputStream(bbis, key.getEncoded(), iv.getIV(), pos);
-        ByteBuffer streamedResultBuf = ByteBuffer.allocate(n);
-        int r = input.read(streamedResultBuf);
-
-        // System.out.println("decrypt1 " + r + ": " + new String(streamedResultBuf.array()));
-        assertArrayEquals(plaintextChunk, streamedResultBuf.array());
-        bb.reset();
 
         // decrypt using CtrCipher#decrypt (non-stream, bytes)
         byte[] bytes = Arrays.copyOfRange(bb.array(), (int) pos, (int) pos + n);
@@ -149,25 +132,15 @@ public class TestCrypto extends LuceneTestCase {
         assertArrayEquals(plaintextChunk, resultBytes2);
         bb.reset();
 
-        bb.put(streamedResultBuf.rewind());
+        bb.put(resultBytes);
 
         pos += n;
         readLength -= n;
       }
       assert readLength == 0;
-    } catch (GeneralSecurityException e) {
-      throw new IOException(e.getMessage() + ": " + this, e);
     } finally {
       // System.out.println(new String(bb.array()));
       assertArrayEquals(Arrays.copyOfRange(plainbytes, 0, totalLength), bb.array());
-      
-      try {
-        if (input != null) {
-          input.close();
-        }
-      } catch (Exception e) {
-        // Noop
-      }
       try {
         channel.close();
       } catch (Exception e) {
