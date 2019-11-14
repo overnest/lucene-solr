@@ -58,38 +58,38 @@ public final class Crypto {
     return encryptionOn.get();
   }
 
-  public static void Initialize() throws NoSuchAlgorithmException {
+  public static void initialize() throws NoSuchAlgorithmException {
     Security.setProperty("crypto.policy", "unlimited");
-    GetSecureRandom();
+    getSecureRandom();
   }
 
-  public static SecretKey GetAesKey() {
+  public static SecretKey getAesKey() {
     if (isEncryptionOn()) {
       return TEST_AES_KEY;
     }
     return null;
   }
 
-  public static IvParameterSpec GetAesIV() {
+  public static IvParameterSpec getAesIV() {
     if (isEncryptionOn()) {
       return TEST_AES_IV;
     }
     return null;
   }
 
-  public static SecretKey GenerateAesKey() throws NoSuchAlgorithmException {
+  public static SecretKey generateAesKey() throws NoSuchAlgorithmException {
     KeyGenerator keyGen = KeyGenerator.getInstance("AES");
     keyGen.init(AES_KEY_SIZE);
     return keyGen.generateKey();
   }
 
-  public static IvParameterSpec GenerateAesIV() throws NoSuchAlgorithmException {
+  public static IvParameterSpec generateAesIV() throws NoSuchAlgorithmException {
     byte[] iv = new byte[AES_BLOCK_SIZE];
-    GetSecureRandom().nextBytes(iv);
+    getSecureRandom().nextBytes(iv);
     return new IvParameterSpec(iv);
   }
 
-  public static SecureRandom GetSecureRandom() throws NoSuchAlgorithmException {
+  static SecureRandom getSecureRandom() throws NoSuchAlgorithmException {
     if (rand == null) {
       synchronized (Crypto.class) {
         if (rand == null) {
@@ -100,26 +100,24 @@ public final class Crypto {
     return rand;
   }
 
-  public static Cipher InitAesCtrCipherEncrypt(SecretKey key, IvParameterSpec iv)
-      throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
-      InvalidAlgorithmParameterException {
-    if (isEncryptionOn()) {
+  public static Cipher getCtrEncryptCipher(SecretKey key, IvParameterSpec iv) throws IOException {
+    try {
       Cipher cipher = Cipher.getInstance(CTR_TRANSFORM);
       cipher.init(Cipher.ENCRYPT_MODE, key, iv);
       return cipher;
+    } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException e) {
+      throw new IOException(e);
     }
-    return null;
   }
 
-  public static byte[] EncryptAesCtr(SecretKey key, IvParameterSpec iv, byte[] plaintext)
-      throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException,
-      BadPaddingException, InvalidAlgorithmParameterException {
-    if (isEncryptionOn()) {
-      Cipher cipher = Cipher.getInstance(CTR_TRANSFORM);
-      cipher.init(Cipher.ENCRYPT_MODE, key, iv);
+  public static byte[] encryptAesCtr(SecretKey key, IvParameterSpec iv, byte[] plaintext)
+      throws IOException {
+    try {
+      Cipher cipher = getCtrEncryptCipher(key, iv);
       return cipher.doFinal(plaintext);
+    } catch (IllegalBlockSizeException | BadPaddingException e) {
+      throw new IOException(e);
     }
-    return plaintext;
   }
 
   public static CtrCipher getCtrDecryptCipher(SecretKey key, IvParameterSpec iv) throws IOException {

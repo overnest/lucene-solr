@@ -175,7 +175,7 @@ public class NIOFSDirectory extends FSDirectory {
       
       CtrCipher cipher = null;
       if (Crypto.isEncryptionOn()) {
-        cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());        
+        cipher = Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
       }
 
       try {
