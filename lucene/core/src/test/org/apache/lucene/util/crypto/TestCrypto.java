@@ -16,9 +16,7 @@
  */
 package org.apache.lucene.util.crypto;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
@@ -26,11 +24,7 @@ import java.util.Base64;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 
-import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
-import org.apache.commons.crypto.stream.CtrCryptoInputStream;
 import org.apache.lucene.util.LuceneTestCase;
-
-import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
 
 public class TestCrypto extends LuceneTestCase {
 
@@ -58,26 +52,34 @@ public class TestCrypto extends LuceneTestCase {
       "and these are called AEAD (authenticated encryption with associated data) schemes. For example, " +
       "EAX mode is a double-pass AEAD scheme while OCB mode is single-pass.";
 
-  public void testGenerateAesKey() throws NoSuchAlgorithmException {
-    SecretKey key = Crypto.GenerateAesKey();
-    String base64 = Base64.getEncoder().encodeToString(key.getEncoded());
-    System.out.println("AES Key: " + base64);
+  public void testGenerateAesKey() {
+    try {
+      SecretKey key = Crypto.generateAesKey();
+      String base64 = Base64.getEncoder().encodeToString(key.getEncoded());
+      System.out.println("AES Key: " + base64);
+    } catch (NoSuchAlgorithmException e) {
+      fail(e.getMessage());
+    }
   }
 
-  public void testGeneratedAesIv() throws NoSuchAlgorithmException {
-    IvParameterSpec iv = Crypto.GenerateAesIV();
-    String base64 = Base64.getEncoder().encodeToString(iv.getIV());
-    System.out.println("AES IV: " + base64);
+  public void testGeneratedAesIv() {
+    try {
+      IvParameterSpec iv = Crypto.generateAesIV();
+      String base64 = Base64.getEncoder().encodeToString(iv.getIV());
+      System.out.println("AES IV: " + base64);
+    } catch (NoSuchAlgorithmException e) {
+      fail(e.getMessage());
+    }
   }
 
   public void testFullDecrypt() throws Exception {  
     byte[] plainbytes = plaintext.getBytes();
     
-    Crypto.Initialize();
-    SecretKey key = Crypto.GenerateAesKey();
-    IvParameterSpec iv = Crypto.GenerateAesIV();
+    Crypto.initialize();
+    SecretKey key = Crypto.generateAesKey();
+    IvParameterSpec iv = Crypto.generateAesIV();
     
-    byte[] ciphertext = Crypto.EncryptAesCtr(key, iv, plainbytes);
+    byte[] ciphertext = Crypto.encryptAesCtr(key, iv, plainbytes);
     byte[] plaintext = Crypto.getCtrDecryptCipher(key, iv).decrypt(ciphertext);
     
     assertEquals(ciphertext.length, plaintext.length);
@@ -88,11 +90,11 @@ public class TestCrypto extends LuceneTestCase {
   public void testPositionCryptoRead() throws Exception {
     byte[] plainbytes = plaintext.getBytes();
 
-    Crypto.Initialize();
-    SecretKey key = Crypto.GenerateAesKey();
-    IvParameterSpec iv = Crypto.GenerateAesIV();
+    Crypto.initialize();
+    SecretKey key = Crypto.generateAesKey();
+    IvParameterSpec iv = Crypto.generateAesIV();
     
-    byte[] ciphertext = Crypto.EncryptAesCtr(key, iv, plainbytes);
+    byte[] ciphertext = Crypto.encryptAesCtr(key, iv, plainbytes);
    
     final int totalLength = 100 + random().nextInt(plainbytes.length - 100);
     
@@ -107,7 +109,6 @@ public class TestCrypto extends LuceneTestCase {
     long pos = 0;    
     channel.position(pos);
 
-    CtrCryptoInputStream input = null;
     CtrCipher cipher = Crypto.getCtrDecryptCipher(key, iv);
 
     try {
@@ -123,51 +124,31 @@ public class TestCrypto extends LuceneTestCase {
         }
 
         byte[] plaintextChunk = Arrays.copyOfRange(plainbytes, (int) pos, (int) pos + n);
-        
-        // decrypt using GetCtrCryptoInputStream
-        ByteBufferBackedInputStream bbis = new ByteBufferBackedInputStream(bb);
-        input = Crypto.GetCtrCryptoInputStream(bbis, key.getEncoded(), iv.getIV(), pos);
-        ByteBuffer streamedResultBuf = ByteBuffer.allocate(n);
-        int r = input.read(streamedResultBuf);
-
-        // System.out.println("decrypt1 " + r + ": " + new String(streamedResultBuf.array()));
-        assertArrayEquals(plaintextChunk, streamedResultBuf.array());
-        bb.reset();
 
         // decrypt using CtrCipher#decrypt (non-stream, bytes)
         byte[] bytes = Arrays.copyOfRange(bb.array(), (int) pos, (int) pos + n);
         byte[] resultBytes = cipher.decrypt(bytes, pos);
         
-        // System.out.println("decrypt2 " + resultBytes.length + ": " + new String(resultBytes));
+        // System.out.println("decrypt " + resultBytes.length + ": " + new String(resultBytes));
         assertArrayEquals(plaintextChunk, resultBytes);
         bb.reset();
         
         // decrypt using CtrCipher#decrypt (non-stream, ByteBuffer)
         byte[] resultBytes2 = cipher.decrypt(bb, pos);
         
-        // System.out.println("decrypt3 " + resultBytes2.length + ": " + new String(resultBytes2));
+        // System.out.println("decrypt2 " + resultBytes2.length + ": " + new String(resultBytes2));
         assertArrayEquals(plaintextChunk, resultBytes2);
         bb.reset();
 
-        bb.put(streamedResultBuf.rewind());
+        bb.put(resultBytes);
 
         pos += n;
         readLength -= n;
       }
       assert readLength == 0;
-    } catch (GeneralSecurityException e) {
-      throw new IOException(e.getMessage() + ": " + this, e);
     } finally {
       // System.out.println(new String(bb.array()));
       assertArrayEquals(Arrays.copyOfRange(plainbytes, 0, totalLength), bb.array());
-      
-      try {
-        if (input != null) {
-          input.close();
-        }
-      } catch (Exception e) {
-        // Noop
-      }
       try {
         channel.close();
       } catch (Exception e) {

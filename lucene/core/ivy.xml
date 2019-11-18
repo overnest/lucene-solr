@@ -18,12 +18,4 @@
 -->
 <ivy-module version="2.0">
   <info organisation="org.apache.lucene" module="core"/>
-  <configurations defaultconfmapping="compile->master">
-    <conf name="compile" transitive="false"/>
-  </configurations>
-  <dependencies>
-    <dependency org="org.apache.commons" name="commons-crypto" rev="${/org.apache.commons/commons-crypto}" conf="compile"/>
-    <dependency org="org.apache.commons" name="commons-compress" rev="${/org.apache.commons/commons-compress}" conf="compile"/>
-    <dependency org="com.fasterxml.jackson.core" name="jackson-databind" rev="${/com.fasterxml.jackson.core/jackson-databind}" conf="compile"/>
-  </dependencies>
 </ivy-module>

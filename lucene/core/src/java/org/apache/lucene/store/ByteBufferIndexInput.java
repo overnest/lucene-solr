@@ -70,19 +70,21 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
     this.chunkSizeMask = (1L << chunkSizePower) - 1L;
     this.guard = guard;
     this.isMmap = (resourceDescription != null && resourceDescription.contains("MMapIndexInput("));
-    
-    if (this.isMmap && Crypto.isEncryptionOn()) {
-      try {
-        this.cipher = Crypto.getCtrDecryptCipher(Crypto.GetAesKey(), Crypto.GetAesIV());
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }      
-    } else {
-      this.cipher = null;
-    }
+    this.cipher = initCipher();
 
     assert chunkSizePower >= 0 && chunkSizePower <= 30;
     assert (length >>> chunkSizePower) < Integer.MAX_VALUE;
+  }
+  
+  private CtrCipher initCipher() {
+    if (this.isMmap && Crypto.isEncryptionOn()) {
+      try {
+        return Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+      } catch (IOException e) {
+        return null;
+      }      
+    }
+    return null;
   }
 
   public byte decryptByte(byte b, long pos) throws GeneralSecurityException, IOException {

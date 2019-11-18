@@ -16,28 +16,25 @@
  */
 package org.apache.lucene.store;
 
-
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
 import javax.crypto.Cipher;
-import javax.crypto.NoSuchPaddingException;
+
 import org.apache.lucene.util.crypto.Crypto;
 
 /** Implementation class for buffered {@link IndexOutput} that writes to an {@link OutputStream}. */
 public class OutputStreamIndexOutput extends IndexOutput {
 
   private final BufferedOutputStream os;
+  private final Cipher cipher;
 
   private long bytesWritten = 0L;
   private boolean flushedOnClose = false;
-  private Cipher cipher = null;
   private Checksum digest;
 
   /**
@@ -47,14 +44,22 @@ public class OutputStreamIndexOutput extends IndexOutput {
    */
   public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize) {
     super(resourceDescription, name);
-    try {
-      cipher = Crypto.InitAesCtrCipherEncrypt(Crypto.GetAesKey(), Crypto.GetAesIV());
-    } catch (InvalidKeyException | NoSuchAlgorithmException | NoSuchPaddingException
-        | InvalidAlgorithmParameterException e) {
-      cipher = null;
-    }
+     
+    this.cipher = initCipher();      
     this.digest = new BufferedChecksum(new CRC32());
     this.os = new BufferedOutputStream(out, bufferSize);
+  }
+  
+  private Cipher initCipher() {
+    if (Crypto.isEncryptionOn()) {
+      try {
+        Crypto.initialize();
+        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+      } catch (IOException | NoSuchAlgorithmException e) {
+        return null;
+      }
+    }
+    return null;
   }
 
   @Override
