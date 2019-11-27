@@ -25,6 +25,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Future; // javadoc
 
+import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.CtrCipher;
+
 /**
  * An {@link FSDirectory} implementation that uses java.nio's FileChannel's
  * positional read, which allows multiple threads to read from the same file
@@ -169,6 +172,11 @@ public class NIOFSDirectory extends FSDirectory {
       if (pos + len > end) {
         throw new EOFException("read past EOF: " + this);
       }
+      
+      CtrCipher cipher = null;
+      if (Crypto.isEncryptionOn()) {
+        cipher = Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+      }
 
       try {
         int readLength = len;
@@ -176,11 +184,25 @@ public class NIOFSDirectory extends FSDirectory {
           final int toRead = Math.min(CHUNK_SIZE, readLength);
           bb.limit(bb.position() + toRead);
           assert bb.remaining() == toRead;
+
+          if (cipher != null) {
+            bb.mark();
+          }
+
           final int i = channel.read(bb, pos);
           if (i < 0) { // be defensive here, even though we checked before hand, something could have changed
             throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " pos: " + pos + " chunkLen: " + toRead + " end: " + end);
           }
           assert i > 0 : "FileChannel.read with non zero-length bb.remaining() must always read at least one byte (FileChannel is in blocking mode, see spec of ReadableByteChannel)";
+
+          if (cipher != null) {
+            bb.reset();
+            byte[] decrypted = cipher.decrypt(bb, pos);
+            assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
+            bb.reset();
+            bb.put(decrypted);
+          }
+
           pos += i;
           readLength -= i;
         }

@@ -103,4 +103,11 @@ grant {
   
   // allows LuceneTestCase#runWithRestrictedPermissions to execute with lower (or no) permission
   permission java.security.SecurityPermission "createAccessControlContext";
+
+  // allows TestCrytpto#testPositionCryptoRead to set crypto key length
+  permission java.security.SecurityPermission "setProperty.crypto.policy";
+
+  permission java.lang.RuntimePermission "accessClassInPackage.sun.nio.ch";
+  permission java.lang.reflect.ReflectPermission "suppressAccessChecks";
+  permission java.util.PropertyPermission "crypto.encryption.on", "write";
 };

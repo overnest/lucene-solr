@@ -80,7 +80,9 @@ import org.apache.lucene.util.LineFileDocs;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.Version;
+import org.apache.lucene.util.crypto.Crypto;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 
 /*
@@ -89,6 +91,11 @@ import org.junit.BeforeClass;
 */
 // See: https://issues.apache.org/jira/browse/SOLR-12028 Tests cannot remove files on Windows machines occasionally
 public class TestBackwardsCompatibility extends LuceneTestCase {
+  @Before
+  public void beforeFunction() {
+    // This test is done with premade unencrypted indexes. Need to turn off encryption
+    Crypto.setEncryptionOn(false);
+  }
 
   // Backcompat index generation, described below, is mostly automated in: 
   //
