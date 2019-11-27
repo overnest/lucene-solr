@@ -418,7 +418,7 @@ public abstract class FSDirectory extends BaseDirectory {
             offset += chunk;
           }
         }
-      }, CHUNK_SIZE);
+      }, CHUNK_SIZE, true);
     }
   }
 

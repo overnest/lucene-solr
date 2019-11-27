@@ -20,12 +20,15 @@ package org.apache.lucene.store;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.SeekableByteChannel;
 import java.nio.channels.ClosedChannelException; // javadoc @link
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Future;
+
+import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.CtrCipher;
 
 /** A straightforward implementation of {@link FSDirectory}
  *  using {@link Files#newByteChannel(Path, java.nio.file.OpenOption...)}.  
@@ -166,7 +169,12 @@ public class SimpleFSDirectory extends FSDirectory {
         if (pos + len > end) {
           throw new EOFException("read past EOF: " + this);
         }
-               
+        
+        CtrCipher cipher = null;
+        if (Crypto.isEncryptionOn()) {
+          cipher = Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+        }
+
         try {
           channel.position(pos);
 
@@ -175,11 +183,25 @@ public class SimpleFSDirectory extends FSDirectory {
             final int toRead = Math.min(CHUNK_SIZE, readLength);
             bb.limit(bb.position() + toRead);
             assert bb.remaining() == toRead;
+
+            if (cipher != null) {
+              bb.mark();
+            }
+
             final int i = channel.read(bb);
             if (i < 0) { // be defensive here, even though we checked before hand, something could have changed
               throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " pos: " + pos + " chunkLen: " + toRead + " end: " + end);
             }
             assert i > 0 : "SeekableByteChannel.read with non zero-length bb.remaining() must always read at least one byte (Channel is in blocking mode, see spec of ReadableByteChannel)";
+
+            if (cipher != null) {
+              bb.reset();
+              byte[] decrypted = cipher.decrypt(bb, pos);
+              assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
+              bb.reset();
+              bb.put(decrypted);
+            }
+
             pos += i;
             readLength -= i;
           }

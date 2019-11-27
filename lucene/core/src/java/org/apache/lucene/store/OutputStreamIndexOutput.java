@@ -20,37 +20,74 @@ package org.apache.lucene.store;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.security.NoSuchAlgorithmException;
 import java.util.zip.CRC32;
-import java.util.zip.CheckedOutputStream;
+import java.util.zip.Checksum;
+
+import javax.crypto.Cipher;
+
+import org.apache.lucene.util.crypto.Crypto;
 
 /** Implementation class for buffered {@link IndexOutput} that writes to an {@link OutputStream}. */
 public class OutputStreamIndexOutput extends IndexOutput {
 
-  private final CRC32 crc = new CRC32();
   private final BufferedOutputStream os;
-  
+  private final Cipher cipher;
+
   private long bytesWritten = 0L;
   private boolean flushedOnClose = false;
+  private Checksum digest;
 
   /**
    * Creates a new {@link OutputStreamIndexOutput} with the given buffer size. 
    * @param bufferSize the buffer size in bytes used to buffer writes internally.
    * @throws IllegalArgumentException if the given buffer size is less or equal to <tt>0</tt>
    */
-  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize) {
+  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize, boolean encryptable) {
     super(resourceDescription, name);
-    this.os = new BufferedOutputStream(new CheckedOutputStream(out, crc), bufferSize);
+     
+    this.cipher = initCipher(encryptable);      
+    this.digest = new BufferedChecksum(new CRC32());
+    this.os = new BufferedOutputStream(out, bufferSize);
+  }
+
+  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize) {
+    this(resourceDescription, name, out, bufferSize, false);
+  }
+
+  private Cipher initCipher(boolean encryptable) {
+    if (encryptable && Crypto.isEncryptionOn()) {
+      try {
+        Crypto.initialize();
+        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+      } catch (IOException | NoSuchAlgorithmException e) {
+        return null;
+      }
+    }
+    return null;
   }
 
   @Override
   public final void writeByte(byte b) throws IOException {
-    os.write(b);
+    if (cipher != null) {
+      byte[] ciphertext = cipher.update(new byte[]{b});
+      os.write(ciphertext[0]);
+    } else {
+      os.write(b);
+    }
+    this.digest.update(b);
     bytesWritten++;
   }
   
   @Override
   public final void writeBytes(byte[] b, int offset, int length) throws IOException {
-    os.write(b, offset, length);
+    if (cipher != null && length > 0) {
+      byte[] ciphertext = cipher.update(b, offset, length);
+      os.write(ciphertext);
+    } else {
+      os.write(b, offset, length);
+    }
+    this.digest.update(b, offset, length);
     bytesWritten += length;
   }
 
@@ -67,9 +104,17 @@ public class OutputStreamIndexOutput extends IndexOutput {
         flushedOnClose = true; // set this BEFORE calling flush!
         o.flush();
       }
+
+      if (cipher != null) {
+        try {
+          cipher.doFinal();
+        } catch (Exception e) {
+          // Noop
+        }
+      }
     }
   }
-  
+
   @Override
   public final long getFilePointer() {
     return bytesWritten;
@@ -78,6 +123,6 @@ public class OutputStreamIndexOutput extends IndexOutput {
   @Override
   public final long getChecksum() throws IOException {
     os.flush();
-    return crc.getValue();
+    return this.digest.getValue();
   }
 }

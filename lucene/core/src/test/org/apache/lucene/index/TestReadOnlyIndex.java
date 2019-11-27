@@ -34,6 +34,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.crypto.Crypto;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
@@ -46,6 +47,9 @@ public class TestReadOnlyIndex extends LuceneTestCase {
 
   @BeforeClass
   public static void buildIndex() throws Exception {
+    // This test is run with restricted permissions. Can not use encryption
+    Crypto.setEncryptionOn(false);
+
     indexPath = Files.createTempDirectory("readonlyindex").toAbsolutePath();
     
     // borrows from TestDemo, but not important to keep in sync with demo
