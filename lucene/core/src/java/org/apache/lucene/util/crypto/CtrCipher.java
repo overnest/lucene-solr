@@ -30,12 +30,12 @@ import javax.crypto.ShortBufferException;
 import javax.crypto.spec.IvParameterSpec;
 
 public class CtrCipher {
-  
+
   private final Cipher cipher;
-  private final byte[] initialIv; 
+  private final byte[] initialIv;
   private final SecretKey key;
-  
-  public CtrCipher(SecretKey key, IvParameterSpec iv) throws IOException {
+
+  protected CtrCipher(SecretKey key, IvParameterSpec iv) throws IOException {
     try {
       this.cipher = Cipher.getInstance("AES/CTR/NoPadding");
     } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
@@ -45,9 +45,64 @@ public class CtrCipher {
     this.key = key;
   }
 
+  public byte[] decrypt(byte[] bytes) throws IOException {
+    return decrypt(bytes, 0);
+  }
+
+  public byte[] decrypt(ByteBuffer bb) throws IOException {
+    return decrypt(bb, 0);
+  }
+
+  public byte[] decrypt(ByteBuffer bb, long offset) throws IOException {
+    return decrypt(readBytes(bb), offset);
+  }
+
+  public byte[] decrypt(byte[] bytes, long offset) throws IOException {
+    return encryptOrDecrypt(Cipher.DECRYPT_MODE, bytes, offset);
+  }
+
+  public byte[] encrypt(byte[] bytes) throws IOException {
+    return encrypt(bytes, 0);
+  }
+
+  public byte[] encrypt(ByteBuffer bb) throws IOException {
+    return encrypt(readBytes(bb), 0);
+  }
+
+  public byte[] encrypt(ByteBuffer bb, long offset) throws IOException {
+    return encrypt(readBytes(bb), offset);
+  }
+
+  public byte[] encrypt(byte[] bytes, long offset) throws IOException {
+    return encryptOrDecrypt(Cipher.ENCRYPT_MODE, bytes, offset);
+  }
+
+  private byte[] encryptOrDecrypt(int operationMode, byte[] bytes, long offset) throws IOException {
+    try {
+      // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getCounter
+      long counter = offset / this.cipher.getBlockSize();
+      byte[] iv = this.initialIv.clone();
+      calculateIV(this.initialIv, counter, iv);
+
+      this.cipher.init(operationMode, this.key, new IvParameterSpec(iv));
+
+      // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getPadding
+      byte padding = (byte) (offset % this.cipher.getBlockSize());
+      byte[] paddedBytes = padBytes(bytes, padding);
+
+      byte[] result = new byte[paddedBytes.length];
+      int n = this.cipher.update(paddedBytes, 0, paddedBytes.length, result, 0);
+
+      return Arrays.copyOfRange(result, padding, n);
+    } catch (InvalidKeyException | InvalidAlgorithmParameterException | ShortBufferException e) {
+      throw new IOException(e);
+    }
+  }
+
   private byte[] padBytes(byte[] arr, byte padding) {
     // pads form start
-    if (padding == 0) return arr;
+    if (padding == 0)
+      return arr;
     byte[] padded = new byte[padding + arr.length];
     System.arraycopy(arr, 0, padded, padding, arr.length);
     return padded;
@@ -55,44 +110,14 @@ public class CtrCipher {
 
   private byte[] readBytes(ByteBuffer bb) {
     byte[] bytes = new byte[bb.limit() - bb.position()];
-    bb.mark();
+    // bb.mark();
     bb.get(bytes);
-    bb.reset();
+    // bb.reset();
     return bytes;
   }
 
-  public byte[] decrypt(byte[] bytes) throws IOException {
-    return decrypt(bytes, 0);
-  }
-
-  public byte[] decrypt(ByteBuffer bb, long offset) throws IOException {
-    return decrypt(readBytes(bb), offset);
-  }
-  
-  public byte[] decrypt(byte[] bytes, long offset) throws IOException {
-    try {
-      // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getCounter    
-      long counter = offset / this.cipher.getBlockSize();
-      byte[] iv = this.initialIv.clone();
-      calculateIV(this.initialIv, counter, iv);
-      
-      this.cipher.init(Cipher.DECRYPT_MODE, this.key, new IvParameterSpec(iv));
-      
-      // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getPadding   
-      byte padding = (byte) (offset % this.cipher.getBlockSize());
-      byte[] paddedBytes = padBytes(bytes, padding);
-      
-      byte[] result = new byte[paddedBytes.length];
-      int n = this.cipher.update(paddedBytes, 0, paddedBytes.length, result, 0);
-      
-      return Arrays.copyOfRange(result, padding, n);
-    } catch (InvalidKeyException | InvalidAlgorithmParameterException | ShortBufferException e) {
-      throw new IOException(e);
-    }
-  }
-
   // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#calculateIV
-  static void calculateIV(byte[] initIV, long counter, byte[] IV) {
+  private void calculateIV(byte[] initIV, long counter, byte[] IV) {
     int i = IV.length; // IV length
     int j = 0; // counter bytes index
     int sum = 0;

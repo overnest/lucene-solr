@@ -26,9 +26,7 @@ import java.security.Security;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
-import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
@@ -64,6 +62,7 @@ public final class Crypto {
   }
 
   public static SecretKey getAesKey() {
+    // TODO fetch from API
     if (isEncryptionOn()) {
       return TEST_AES_KEY;
     }
@@ -71,6 +70,7 @@ public final class Crypto {
   }
 
   public static IvParameterSpec getAesIV() {
+    // TODO fetch from API
     if (isEncryptionOn()) {
       return TEST_AES_IV;
     }
@@ -89,7 +89,7 @@ public final class Crypto {
     return new IvParameterSpec(iv);
   }
 
-  static SecureRandom getSecureRandom() throws NoSuchAlgorithmException {
+  private static SecureRandom getSecureRandom() throws NoSuchAlgorithmException {
     if (rand == null) {
       synchronized (Crypto.class) {
         if (rand == null) {
@@ -105,23 +105,15 @@ public final class Crypto {
       Cipher cipher = Cipher.getInstance(CTR_TRANSFORM);
       cipher.init(Cipher.ENCRYPT_MODE, key, iv);
       return cipher;
-    } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | InvalidAlgorithmParameterException e) {
+    } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException
+        | InvalidAlgorithmParameterException e) {
       throw new IOException(e);
     }
   }
 
-  public static byte[] encryptAesCtr(SecretKey key, IvParameterSpec iv, byte[] plaintext)
-      throws IOException {
-    try {
-      Cipher cipher = getCtrEncryptCipher(key, iv);
-      return cipher.doFinal(plaintext);
-    } catch (IllegalBlockSizeException | BadPaddingException e) {
-      throw new IOException(e);
-    }
-  }
-
-  public static CtrCipher getCtrDecryptCipher(SecretKey key, IvParameterSpec iv) throws IOException {
+  // TODO: Rethink the design
+  public static CtrCipher getCtrCipher(SecretKey key, IvParameterSpec iv) throws IOException {
     return new CtrCipher(key, iv);
   }
-  
+
 }

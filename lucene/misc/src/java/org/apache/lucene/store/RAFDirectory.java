@@ -152,7 +152,7 @@ public class RAFDirectory extends FSDirectory {
         
         CtrCipher cipher = null;
         if (Crypto.isEncryptionOn()) {
-          cipher = Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+          cipher = Crypto.getCtrCipher(Crypto.getAesKey(), Crypto.getAesIV());
         }
 
         try {
