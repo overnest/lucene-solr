@@ -83,7 +83,7 @@ public abstract class ByteBufferIndexInput extends IndexInput implements RandomA
   private CtrCipher initCipher(boolean encryptable) {
     if (encryptable && Crypto.isEncryptionOn()) {
       try {
-        return Crypto.getCtrDecryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+        return Crypto.getCtrCipher(Crypto.getAesKey(), Crypto.getAesIV());
       } catch (IOException e) {
         return null;
       }      
