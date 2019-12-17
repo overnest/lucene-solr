@@ -67,6 +67,7 @@ public class TestReadOnlyIndex extends LuceneTestCase {
   @AfterClass
   public static void afterClass() throws Exception {
     indexPath = null;
+    Crypto.setEncryptionOn(true);
   }
   
   public void testReadOnlyIndex() throws Exception {
