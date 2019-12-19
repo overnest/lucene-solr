@@ -81,6 +81,7 @@ import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.Version;
 import org.apache.lucene.util.crypto.Crypto;
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -95,6 +96,11 @@ public class TestBackwardsCompatibility extends LuceneTestCase {
   public void beforeFunction() {
     // This test is done with premade unencrypted indexes. Need to turn off encryption
     Crypto.setEncryptionOn(false);
+  }
+
+  @After
+  public void afterFunction() {
+    Crypto.setEncryptionOn(true);
   }
 
   // Backcompat index generation, described below, is mostly automated in: 

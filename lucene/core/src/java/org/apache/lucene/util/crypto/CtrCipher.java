@@ -31,16 +31,10 @@ import javax.crypto.spec.IvParameterSpec;
 
 public class CtrCipher {
 
-  private final Cipher cipher;
   private final byte[] initialIv;
   private final SecretKey key;
 
   protected CtrCipher(SecretKey key, IvParameterSpec iv) throws IOException {
-    try {
-      this.cipher = Cipher.getInstance("AES/CTR/NoPadding");
-    } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
-      throw new IOException(e);
-    }
     this.initialIv = iv.getIV();
     this.key = key;
   }
@@ -50,7 +44,7 @@ public class CtrCipher {
   }
 
   public byte[] decrypt(ByteBuffer bb) throws IOException {
-    return decrypt(bb, 0);
+    return decrypt(readBytes(bb), 0);
   }
 
   public byte[] decrypt(ByteBuffer bb, long offset) throws IOException {
@@ -79,22 +73,24 @@ public class CtrCipher {
 
   private byte[] encryptOrDecrypt(int operationMode, byte[] bytes, long offset) throws IOException {
     try {
+      Cipher cipher = Cipher.getInstance(Crypto.CTR_TRANSFORM);
+
       // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getCounter
-      long counter = offset / this.cipher.getBlockSize();
+      long counter = offset / cipher.getBlockSize();
       byte[] iv = this.initialIv.clone();
       calculateIV(this.initialIv, counter, iv);
 
-      this.cipher.init(operationMode, this.key, new IvParameterSpec(iv));
+      cipher.init(operationMode, this.key, new IvParameterSpec(iv));
 
       // org.apache.commons.crypto.stream.CtrCryptoInputStream.java#getPadding
-      byte padding = (byte) (offset % this.cipher.getBlockSize());
+      byte padding = (byte) (offset % cipher.getBlockSize());
       byte[] paddedBytes = padBytes(bytes, padding);
 
       byte[] result = new byte[paddedBytes.length];
-      int n = this.cipher.update(paddedBytes, 0, paddedBytes.length, result, 0);
+      int n = cipher.update(paddedBytes, 0, paddedBytes.length, result, 0);
 
       return Arrays.copyOfRange(result, padding, n);
-    } catch (InvalidKeyException | InvalidAlgorithmParameterException | ShortBufferException e) {
+    } catch (InvalidKeyException | InvalidAlgorithmParameterException | ShortBufferException | NoSuchPaddingException | NoSuchAlgorithmException e) {
       throw new IOException(e);
     }
   }
