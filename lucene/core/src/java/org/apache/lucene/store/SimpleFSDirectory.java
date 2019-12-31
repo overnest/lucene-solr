@@ -28,7 +28,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Future;
 
 import org.apache.lucene.util.crypto.Crypto;
-import org.apache.lucene.util.crypto.CtrCipher;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 /** A straightforward implementation of {@link FSDirectory}
  *  using {@link Files#newByteChannel(Path, java.nio.file.OpenOption...)}.  
@@ -49,7 +49,7 @@ import org.apache.lucene.util.crypto.CtrCipher;
  * </p>
  */
 public class SimpleFSDirectory extends FSDirectory {
-    
+
   /** Create a new SimpleFSDirectory for the named location.
    *  The directory is created at the named location if it does not yet exist.
    *
@@ -59,8 +59,10 @@ public class SimpleFSDirectory extends FSDirectory {
    */
   public SimpleFSDirectory(Path path, LockFactory lockFactory) throws IOException {
     super(path, lockFactory);
+    // this directory is encrypted by default
+    useEncryption = Crypto.isEncryptionOn();
   }
-  
+
   /** Create a new SimpleFSDirectory for the named location and {@link FSLockFactory#getDefault()}.
    *  The directory is created at the named location if it does not yet exist.
    *
@@ -77,7 +79,9 @@ public class SimpleFSDirectory extends FSDirectory {
     ensureOpen();
     ensureCanRead(name);
     Path path = directory.resolve(name);
-    SeekableByteChannel channel = Files.newByteChannel(path, StandardOpenOption.READ);
+    SeekableByteChannel channel = useEncryption
+        ? EncryptedFileChannel.open(path, StandardOpenOption.READ)
+            : Files.newByteChannel(path, StandardOpenOption.READ);
     return new SimpleFSIndexInput("SimpleFSIndexInput(path=\"" + path + "\")", channel, context);
   }
 
@@ -170,11 +174,6 @@ public class SimpleFSDirectory extends FSDirectory {
           throw new EOFException("read past EOF: " + this);
         }
         
-        CtrCipher cipher = null;
-        if (Crypto.isEncryptionOn()) {
-          cipher = Crypto.getCtrCipher(Crypto.getAesKey(), Crypto.getAesIV());
-        }
-
         try {
           channel.position(pos);
 
@@ -184,23 +183,11 @@ public class SimpleFSDirectory extends FSDirectory {
             bb.limit(bb.position() + toRead);
             assert bb.remaining() == toRead;
 
-            if (cipher != null) {
-              bb.mark();
-            }
-
             final int i = channel.read(bb);
             if (i < 0) { // be defensive here, even though we checked before hand, something could have changed
               throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " pos: " + pos + " chunkLen: " + toRead + " end: " + end);
             }
             assert i > 0 : "SeekableByteChannel.read with non zero-length bb.remaining() must always read at least one byte (Channel is in blocking mode, see spec of ReadableByteChannel)";
-
-            if (cipher != null) {
-              bb.reset();
-              byte[] decrypted = cipher.decrypt(bb, pos);
-              assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
-              bb.reset();
-              bb.put(decrypted);
-            }
 
             pos += i;
             readLength -= i;

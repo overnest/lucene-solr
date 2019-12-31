@@ -38,6 +38,10 @@ public class CtrCipher {
     this.initialIv = iv.getIV();
     this.key = key;
   }
+  
+  public byte[] getIV() {
+    return this.initialIv;
+  }
 
   public byte[] decrypt(byte[] bytes) throws IOException {
     return decrypt(bytes, 0);

@@ -50,6 +50,7 @@ import org.apache.lucene.mockfile.ExtrasFS;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 import org.junit.Assert;
 
 /**
@@ -581,11 +582,10 @@ public abstract class BaseDirectoryTestCase extends LuceneTestCase {
           byteUpto = 0;
         }
       }
-
       out.writeBytes(bytes, 0, byteUpto);
       assertEquals(size, out.getFilePointer());
       out.close();
-      assertEquals(size, dir.fileLength("test"));
+      assertEquals(size + (dir.usesEncryption() ? EncryptedFileChannel.IV_LENGTH : 0), dir.fileLength("test"));
 
       // copy from test -> test2
       final IndexInput in = dir.openInput("test", newIOContext(random()));

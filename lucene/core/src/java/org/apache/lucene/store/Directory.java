@@ -217,4 +217,8 @@ public abstract class Directory implements Closeable {
   protected static String getTempFileName(String prefix, String suffix, long counter) {
     return IndexFileNames.segmentFileName(prefix, suffix + "_" + Long.toString(counter, Character.MAX_RADIX), "tmp");
   }
+  
+  public boolean usesEncryption() {
+    return false;
+  }
 }

@@ -27,6 +27,7 @@ import java.util.zip.Checksum;
 import javax.crypto.Cipher;
 
 import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 /** Implementation class for buffered {@link IndexOutput} that writes to an {@link OutputStream}. */
 public class OutputStreamIndexOutput extends IndexOutput {
@@ -34,6 +35,7 @@ public class OutputStreamIndexOutput extends IndexOutput {
   private final BufferedOutputStream os;
   private final Cipher cipher;
 
+  private boolean ivWritten = false;
   private long bytesWritten = 0L;
   private boolean flushedOnClose = false;
   private Checksum digest;
@@ -43,33 +45,46 @@ public class OutputStreamIndexOutput extends IndexOutput {
    * @param bufferSize the buffer size in bytes used to buffer writes internally.
    * @throws IllegalArgumentException if the given buffer size is less or equal to <tt>0</tt>
    */
-  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize, boolean encryptable) {
+  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize, boolean useEncryption) {
     super(resourceDescription, name);
      
-    this.cipher = initCipher(encryptable);      
     this.digest = new BufferedChecksum(new CRC32());
-    this.os = new BufferedOutputStream(out, bufferSize);
+    this.cipher = initCipher(useEncryption);      
+    this.os = new BufferedOutputStream(out, bufferSize + (this.cipher != null ? EncryptedFileChannel.IV_LENGTH : 0));
   }
 
   public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize) {
     this(resourceDescription, name, out, bufferSize, false);
   }
 
-  private Cipher initCipher(boolean encryptable) {
-    if (encryptable && Crypto.isEncryptionOn()) {
+  private Cipher initCipher(boolean useEncryption) {
+    if (useEncryption && Crypto.isEncryptionOn()) {
       try {
         Crypto.initialize();
-        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(), Crypto.getAesIV());
+        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(), Crypto.generateAesIV());
       } catch (IOException | NoSuchAlgorithmException e) {
         return null;
       }
     }
     return null;
   }
+  
+  private final void ensureIv() throws IOException {
+    if (ivWritten) {
+      return;
+    }
+    assert bytesWritten == 0L : "Bytes written before IV! " + bytesWritten;
+    ivWritten = true;
+    byte[] iv = cipher.getIV();
+    // write IV at the beginning of output
+    this.os.write(iv);
+    // Important: don't update digest and don't update bytesWritten
+  }
 
   @Override
   public final void writeByte(byte b) throws IOException {
     if (cipher != null) {
+      ensureIv();
       byte[] ciphertext = cipher.update(new byte[]{b});
       os.write(ciphertext[0]);
     } else {
@@ -82,6 +97,7 @@ public class OutputStreamIndexOutput extends IndexOutput {
   @Override
   public final void writeBytes(byte[] b, int offset, int length) throws IOException {
     if (cipher != null && length > 0) {
+      ensureIv();
       byte[] ciphertext = cipher.update(b, offset, length);
       os.write(ciphertext);
     } else {

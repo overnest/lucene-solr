@@ -21,11 +21,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 import org.apache.lucene.util.SuppressForbidden;
-import org.apache.lucene.util.crypto.Crypto;
-import org.apache.lucene.util.crypto.CtrCipher;
 
 /** A straightforward implementation of {@link FSDirectory}
  *  using java.io.RandomAccessFile.  However, this class has
@@ -149,11 +146,6 @@ public class RAFDirectory extends FSDirectory {
         if (position + len > end) {
           throw new EOFException("read past EOF: " + this);
         }
-        
-        CtrCipher cipher = null;
-        if (Crypto.isEncryptionOn()) {
-          cipher = Crypto.getCtrCipher(Crypto.getAesKey(), Crypto.getAesIV());
-        }
 
         try {
           while (total < len) {
@@ -163,13 +155,6 @@ public class RAFDirectory extends FSDirectory {
              throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " total: " + total + " chunkLen: " + toRead + " end: " + end);
             }
             assert i > 0 : "RandomAccessFile.read with non zero-length toRead must always read at least one byte";
-
-            if (cipher != null) {
-              byte[] decrypted = cipher.decrypt(Arrays.copyOfRange(b, offset + total, offset + total + i), position + total);
-              
-              assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
-              System.arraycopy(decrypted, 0, b, offset + total, i);
-            }
 
             total += i;
           }

@@ -246,4 +246,8 @@ public class FileSwitchDirectory extends Directory {
       return Collections.unmodifiableSet(combined);
     }
   }
+  
+  public boolean usesEncryption() {
+    return primaryDir.usesEncryption() || secondaryDir.usesEncryption();
+  }
 }

@@ -26,7 +26,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Future; // javadoc
 
 import org.apache.lucene.util.crypto.Crypto;
-import org.apache.lucene.util.crypto.CtrCipher;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 /**
  * An {@link FSDirectory} implementation that uses java.nio's FileChannel's
@@ -64,6 +64,8 @@ public class NIOFSDirectory extends FSDirectory {
    */
   public NIOFSDirectory(Path path, LockFactory lockFactory) throws IOException {
     super(path, lockFactory);
+    // this directory is encrypted by default
+    useEncryption = Crypto.isEncryptionOn();
   }
 
   /** Create a new NIOFSDirectory for the named location and {@link FSLockFactory#getDefault()}.
@@ -75,16 +77,18 @@ public class NIOFSDirectory extends FSDirectory {
   public NIOFSDirectory(Path path) throws IOException {
     this(path, FSLockFactory.getDefault());
   }
-
+ 
   @Override
   public IndexInput openInput(String name, IOContext context) throws IOException {
     ensureOpen();
     ensureCanRead(name);
     Path path = getDirectory().resolve(name);
-    FileChannel fc = FileChannel.open(path, StandardOpenOption.READ);
+    FileChannel fc = useEncryption
+        ? EncryptedFileChannel.open(path, StandardOpenOption.READ)
+            : FileChannel.open(path, StandardOpenOption.READ);
     return new NIOFSIndexInput("NIOFSIndexInput(path=\"" + path + "\")", fc, context);
   }
-  
+
   /**
    * Reads bytes with {@link FileChannel#read(ByteBuffer, long)}
    */
@@ -172,11 +176,6 @@ public class NIOFSDirectory extends FSDirectory {
       if (pos + len > end) {
         throw new EOFException("read past EOF: " + this);
       }
-      
-      CtrCipher cipher = null;
-      if (Crypto.isEncryptionOn()) {
-        cipher = Crypto.getCtrCipher(Crypto.getAesKey(), Crypto.getAesIV());
-      }
 
       try {
         int readLength = len;
@@ -185,23 +184,11 @@ public class NIOFSDirectory extends FSDirectory {
           bb.limit(bb.position() + toRead);
           assert bb.remaining() == toRead;
 
-          if (cipher != null) {
-            bb.mark();
-          }
-
           final int i = channel.read(bb, pos);
           if (i < 0) { // be defensive here, even though we checked before hand, something could have changed
             throw new EOFException("read past EOF: " + this + " off: " + offset + " len: " + len + " pos: " + pos + " chunkLen: " + toRead + " end: " + end);
           }
           assert i > 0 : "FileChannel.read with non zero-length bb.remaining() must always read at least one byte (FileChannel is in blocking mode, see spec of ReadableByteChannel)";
-
-          if (cipher != null) {
-            bb.reset();
-            byte[] decrypted = cipher.decrypt(bb, pos);
-            assert decrypted.length == i : "Read " + i + " bytes from channel, but only decrypted " + decrypted.length + " bytes";
-            bb.reset();
-            bb.put(decrypted);
-          }
 
           pos += i;
           readLength -= i;

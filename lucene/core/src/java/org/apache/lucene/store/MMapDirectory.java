@@ -40,6 +40,8 @@ import java.lang.reflect.Method;
 import org.apache.lucene.store.ByteBufferGuard.BufferCleaner;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SuppressForbidden;
+import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 /** File-based {@link Directory} implementation that uses
  *  mmap for reading, and {@link
@@ -162,6 +164,8 @@ public class MMapDirectory extends FSDirectory {
     }
     this.chunkSizePower = 31 - Integer.numberOfLeadingZeros(maxChunkSize);
     assert this.chunkSizePower >= 0 && this.chunkSizePower <= 30;
+    // this directory is encrypted by default
+    useEncryption = Crypto.isEncryptionOn();
   }
   
   /**
@@ -220,7 +224,7 @@ public class MMapDirectory extends FSDirectory {
   public boolean getPreload() {
     return preload;
   }
-  
+
   /**
    * Returns the current mmap chunk size.
    * @see #MMapDirectory(Path, LockFactory, int)
@@ -235,12 +239,14 @@ public class MMapDirectory extends FSDirectory {
     ensureOpen();
     ensureCanRead(name);
     Path path = directory.resolve(name);
-    try (FileChannel c = FileChannel.open(path, StandardOpenOption.READ)) {
+    try (FileChannel c = useEncryption
+        ? EncryptedFileChannel.openMappable(path, StandardOpenOption.READ)
+        : FileChannel.open(path, StandardOpenOption.READ)) {
       final String resourceDescription = "MMapIndexInput(path=\"" + path.toString() + "\")";
       final boolean useUnmap = getUseUnmap();
       return ByteBufferIndexInput.newInstance(resourceDescription,
           map(resourceDescription, c, 0, c.size()), 
-          c.size(), chunkSizePower, new ByteBufferGuard(resourceDescription, useUnmap ? CLEANER : null), true);
+          c.size(), chunkSizePower, new ByteBufferGuard(resourceDescription, useUnmap ? CLEANER : null));
     }
   }
 

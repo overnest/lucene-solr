@@ -126,6 +126,8 @@ import org.apache.lucene.util.IOUtils;
 public abstract class FSDirectory extends BaseDirectory {
 
   protected final Path directory; // The underlying filesystem directory
+  
+  protected boolean useEncryption = false;
 
   /** Maps files that we are trying to delete (or we tried already but failed)
    *  before attempting to delete that key. */
@@ -200,6 +202,17 @@ public abstract class FSDirectory extends BaseDirectory {
       return new NIOFSDirectory(path, lockFactory);
     }
   }
+  
+  /** Use to manually turn the encryption on/off for this directory
+   */
+  public void setUseEncryption(boolean useEncryption) {
+    this.useEncryption = useEncryption;
+  }
+  
+  @Override
+  public boolean usesEncryption() {
+    return useEncryption;
+  }
 
   /** Lists all files (including subdirectories) in the directory.
    *
@@ -251,7 +264,7 @@ public abstract class FSDirectory extends BaseDirectory {
       privateDeleteFile(name, true); // try again to delete it - this is best effort
       pendingDeletes.remove(name); // watch out - if the delete fails it put
     }
-    return new FSIndexOutput(name);
+    return new FSIndexOutput(name, useEncryption);
   }
 
   @Override
@@ -264,7 +277,7 @@ public abstract class FSDirectory extends BaseDirectory {
         if (pendingDeletes.contains(name)) {
           continue;
         }
-        return new FSIndexOutput(name,
+        return new FSIndexOutput(name, useEncryption,
                                  StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
       } catch (FileAlreadyExistsException faee) {
         // Retry with next incremented name
@@ -402,11 +415,11 @@ public abstract class FSDirectory extends BaseDirectory {
      */
     static final int CHUNK_SIZE = 8192;
     
-    public FSIndexOutput(String name) throws IOException {
-      this(name, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+    public FSIndexOutput(String name, boolean useEncryption) throws IOException {
+      this(name, useEncryption, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
     }
 
-    FSIndexOutput(String name, OpenOption... options) throws IOException {
+    FSIndexOutput(String name, boolean useEncryption, OpenOption... options) throws IOException {
       super("FSIndexOutput(path=\"" + directory.resolve(name) + "\")", name, new FilterOutputStream(Files.newOutputStream(directory.resolve(name), options)) {
         // This implementation ensures, that we never write more than CHUNK_SIZE bytes:
         @Override
@@ -418,7 +431,7 @@ public abstract class FSDirectory extends BaseDirectory {
             offset += chunk;
           }
         }
-      }, CHUNK_SIZE, true);
+      }, CHUNK_SIZE, useEncryption);
     }
   }
 

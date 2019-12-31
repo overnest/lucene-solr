@@ -28,6 +28,7 @@ import java.util.Set;
 
 import org.apache.lucene.mockfile.ExtrasFS;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 public class TestDirectory extends LuceneTestCase {
 
@@ -63,7 +64,7 @@ public class TestDirectory extends LuceneTestCase {
         FSDirectory d2 = dirs[j];
         d2.ensureOpen();
         assertTrue(slowFileExists(d2, fname));
-        assertEquals(1 + largeBuffer.length, d2.fileLength(fname));
+        assertEquals(1 + largeBuffer.length + (d2.usesEncryption() ? EncryptedFileChannel.IV_LENGTH : 0), d2.fileLength(fname));
 
         // don't do read tests if unmapping is not supported!
         if (d2 instanceof MMapDirectory && !((MMapDirectory) d2).getUseUnmap())
