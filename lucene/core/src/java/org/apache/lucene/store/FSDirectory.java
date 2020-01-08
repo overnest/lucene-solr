@@ -431,7 +431,7 @@ public abstract class FSDirectory extends BaseDirectory {
             offset += chunk;
           }
         }
-      }, CHUNK_SIZE, useEncryption);
+      }, CHUNK_SIZE, useEncryption, directory.resolve(name));
     }
   }
 

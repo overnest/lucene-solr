@@ -81,9 +81,7 @@ import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.Version;
 import org.apache.lucene.util.crypto.Crypto;
-import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 
 /*
@@ -92,17 +90,6 @@ import org.junit.BeforeClass;
 */
 // See: https://issues.apache.org/jira/browse/SOLR-12028 Tests cannot remove files on Windows machines occasionally
 public class TestBackwardsCompatibility extends LuceneTestCase {
-  @Before
-  public void beforeFunction() {
-    // This test is done with premade unencrypted indexes. Need to turn off encryption
-    Crypto.setEncryptionOn(false);
-  }
-
-  @After
-  public void afterFunction() {
-    Crypto.setEncryptionOn(true);
-  }
-
   // Backcompat index generation, described below, is mostly automated in: 
   //
   //    dev-tools/scripts/addBackcompatIndexes.py
@@ -559,6 +546,9 @@ public class TestBackwardsCompatibility extends LuceneTestCase {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
+    // This test is done with premade unencrypted indexes. Need to turn off encryption
+    Crypto.setEncryptionOn(false);
+    
     List<String> names = new ArrayList<>(oldNames.length + oldSingleSegmentNames.length);
     names.addAll(Arrays.asList(oldNames));
     names.addAll(Arrays.asList(oldSingleSegmentNames));
@@ -578,6 +568,7 @@ public class TestBackwardsCompatibility extends LuceneTestCase {
       d.close();
     }
     oldIndexDirs = null;
+    Crypto.setEncryptionOn(true);
   }
 
   public void testAllVersionHaveCfsAndNocfs() {

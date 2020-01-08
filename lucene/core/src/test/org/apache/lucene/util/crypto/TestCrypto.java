@@ -18,6 +18,8 @@ package org.apache.lucene.util.crypto;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
@@ -100,6 +102,32 @@ public class TestCrypto extends LuceneTestCase {
     } catch (NoSuchAlgorithmException e) {
       fail(e.getMessage());
     }
+  }
+
+  public void testGetIndexUuid() {
+    assertTrue(Crypto.isTestingOn()); // on for all lucene tests
+    Crypto.setTestingOn(false);
+    Path indexShardPath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si");
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(indexShardPath));
+    Path indexStatePath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/meYv1aJjQLCYtyc-pKkfGg/_state/state-1.st");
+    assertEquals("meYv1aJjQLCYtyc-pKkfGg", Crypto.getIndexUid(indexStatePath));
+    Path translogPath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/meYv1aJjQLCYtyc-pKkfGg/0/translog/translog-3.tlog");
+    assertEquals("meYv1aJjQLCYtyc-pKkfGg", Crypto.getIndexUid(translogPath));
+    
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("nodes/0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("../0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    
+    try {
+      Crypto.getIndexUid(Paths.get("/tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string"));
+      fail("Crypto.getIndexUid should fail when missing no 'indices' in path");
+    } catch (IllegalArgumentException e) {
+      assertEquals("Invalid path for encryption /tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string", e.getMessage());
+    }
+    
+    Crypto.setTestingOn(true);
+    // tests use ad hoc directory structure without "indices"
+    assertEquals("lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001", Crypto.getIndexUid(Paths.get("/tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string")));
   }
 
   public void testFullEncrypt() throws Exception {

@@ -60,7 +60,7 @@ public class EncryptedFileChannel extends FileChannel {
       this.channel = FileChannel.open(path, options);
       
       IvParameterSpec iv = getIv(origOptions);
-      this.cipher = iv != null ? new CtrCipher(Crypto.getAesKey(), iv) : null;
+      this.cipher = iv != null ? new CtrCipher(Crypto.getAesKey(path), iv) : null;
       
     } catch (FileNotFoundException ex) {
       throw new IOException(ex);

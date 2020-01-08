@@ -104,6 +104,7 @@ import org.apache.lucene.store.RawDirectoryWrapper;
 import org.apache.lucene.util.automaton.AutomatonTestUtil;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.apache.lucene.util.automaton.RegExp;
+import org.apache.lucene.util.crypto.Crypto;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -1877,6 +1878,18 @@ public abstract class LuceneTestCase extends Assert {
   @AfterClass
   public static void restoreSpins() {
     System.clearProperty(ConcurrentMergeScheduler.DEFAULT_SPINS_PROPERTY);
+  }
+  
+  // setup mock crypto keys for this test run.
+
+  @BeforeClass
+  public static void setCryptoTesting() throws Exception {
+      Crypto.setTestingOn(true);
+  }
+
+  @AfterClass
+  public static void restoreCryptoTesting() throws Exception {
+      Crypto.setTestingOn(false);
   }
 
   /**
