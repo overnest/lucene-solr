@@ -105,29 +105,28 @@ public class TestCrypto extends LuceneTestCase {
   }
 
   public void testGetIndexUuid() {
-    assertTrue(Crypto.isTestingOn()); // on for all lucene tests
-    Crypto.setTestingOn(false);
+    StrongDocKeyProvider keyProvider = new StrongDocKeyProvider();
+    
     Path indexShardPath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si");
-    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(indexShardPath));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", keyProvider.getIndexUid(indexShardPath));
     Path indexStatePath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/meYv1aJjQLCYtyc-pKkfGg/_state/state-1.st");
-    assertEquals("meYv1aJjQLCYtyc-pKkfGg", Crypto.getIndexUid(indexStatePath));
+    assertEquals("meYv1aJjQLCYtyc-pKkfGg", keyProvider.getIndexUid(indexStatePath));
     Path translogPath = Paths.get("elasticsearch/distribution/build/cluster/run node0/elasticsearch-7.4.3-SNAPSHOT/data/nodes/0/indices/meYv1aJjQLCYtyc-pKkfGg/0/translog/translog-3.tlog");
-    assertEquals("meYv1aJjQLCYtyc-pKkfGg", Crypto.getIndexUid(translogPath));
+    assertEquals("meYv1aJjQLCYtyc-pKkfGg", keyProvider.getIndexUid(translogPath));
     
-    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("nodes/0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
-    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("../0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
-    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", Crypto.getIndexUid(Paths.get("indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", keyProvider.getIndexUid(Paths.get("nodes/0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", keyProvider.getIndexUid(Paths.get("../0/indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
+    assertEquals("5hQh3cVjS1Gv1C5ww1m2Bg", keyProvider.getIndexUid(Paths.get("indices/5hQh3cVjS1Gv1C5ww1m2Bg/0/index/_2.si")));
     
-    try {
-      Crypto.getIndexUid(Paths.get("/tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string"));
-      fail("Crypto.getIndexUid should fail when missing no 'indices' in path");
-    } catch (IllegalArgumentException e) {
-      assertEquals("Invalid path for encryption /tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string", e.getMessage());
-    }
+    IllegalArgumentException ex = expectThrows(IllegalArgumentException.class, () -> {
+      keyProvider.getIndexUid(Paths.get("nodes/0/indices/"));      
+    });
+    assertTrue(ex.getMessage().contains("Invalid path for encryption, must contain \"indices\" segment followed by the index uuid"));
     
-    Crypto.setTestingOn(true);
-    // tests use ad hoc directory structure without "indices"
-    assertEquals("lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001", Crypto.getIndexUid(Paths.get("/tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string")));
+    ex = expectThrows(IllegalArgumentException.class, () -> {
+      keyProvider.getIndexUid(Paths.get("/tmp/lucene.store.TestNIOFSDirectory_1B2F7698E6054884-001/testString-001/string"));      
+    });
+    assertTrue(ex.getMessage().contains("Invalid path for encryption, must contain \"indices\" segment followed by the index uuid"));
   }
 
   public void testFullEncrypt() throws Exception {

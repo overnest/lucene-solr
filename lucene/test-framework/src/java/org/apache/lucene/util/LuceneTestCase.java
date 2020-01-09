@@ -105,6 +105,7 @@ import org.apache.lucene.util.automaton.AutomatonTestUtil;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.apache.lucene.util.automaton.RegExp;
 import org.apache.lucene.util.crypto.Crypto;
+import org.apache.lucene.util.crypto.MockKeyProvider;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -1884,12 +1885,12 @@ public abstract class LuceneTestCase extends Assert {
 
   @BeforeClass
   public static void setCryptoTesting() throws Exception {
-      Crypto.setTestingOn(true);
+      Crypto.setCustomKeyProvider(new MockKeyProvider());
   }
 
   @AfterClass
   public static void restoreCryptoTesting() throws Exception {
-      Crypto.setTestingOn(false);
+      Crypto.setCustomKeyProvider(null);
   }
 
   /**

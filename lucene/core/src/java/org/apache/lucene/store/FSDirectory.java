@@ -430,7 +430,7 @@ public abstract class FSDirectory extends BaseDirectory {
      * a native buffer outside of stack if the write buffer size is larger.
      */
     static final int CHUNK_SIZE = 8192;
-      
+    
     public FSIndexOutput(String name, Cipher cipher) throws IOException {
       this(name, cipher, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
     }

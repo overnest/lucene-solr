@@ -19,16 +19,12 @@ package org.apache.lucene.util.crypto;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
-import java.util.Arrays;
 import java.util.Base64;
-import java.util.Iterator;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.Cipher;
@@ -36,7 +32,6 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 
 public final class Crypto {
 
@@ -47,24 +42,12 @@ public final class Crypto {
   public static int AES_KEY_SIZE = 256;
   public static int AES_BLOCK_SIZE = 16;
   public static String CTR_TRANSFORM = "AES/CTR/NoPadding";
-  private static Path INDICES_PATH = Paths.get("indices");
 
-  public static volatile AtomicBoolean encryptionOn = new AtomicBoolean(true);
-  public static volatile AtomicBoolean testingOn = new AtomicBoolean(false);
+  private static volatile AtomicBoolean encryptionOn = new AtomicBoolean(true);
 
-  public static List<SecretKey> TEST_AES_KEYS =  Arrays.asList(
-      new SecretKeySpec(
-          Base64.getDecoder().decode("4tZ9S+gRYX2F3fm+BIWDDvkcXbkKYXBmB27hixPvSjU="), AES_ALGORITHM),
-      new SecretKeySpec(
-          Base64.getDecoder().decode("7C9Q6SnqXwrfI03LPE2J0LEcnnVP/YnF8O3hGvpjs7Q="), AES_ALGORITHM),
-      new SecretKeySpec(
-          Base64.getDecoder().decode("UqVyK+sHZQVGJBbTr8UDN5TF/t5f9MgqmVkSxi6uJu0="), AES_ALGORITHM),
-      new SecretKeySpec(
-          Base64.getDecoder().decode("pd0fWwS7glXPpbzrPavNx7zpo25DLXa1gAbsijz2pHw="), AES_ALGORITHM),
-      new SecretKeySpec(
-          Base64.getDecoder().decode("dtCrOKsvBlgAc3ZAGAxlWHlHK3dNNXjhrCtjXXJavtk="), AES_ALGORITHM)
-  );
-  
+  private final static KeyProvider defaultKeyProvider = new StrongDocKeyProvider();
+  private static KeyProvider customKeyProvider = null;
+
   public static boolean setEncryptionOn(boolean on) {
     return encryptionOn.getAndSet(on);
   }
@@ -72,46 +55,29 @@ public final class Crypto {
   public static boolean isEncryptionOn() {
     return encryptionOn.get();
   }
-  
-  public static boolean setTestingOn(boolean on) {
-    return testingOn.getAndSet(on);
+
+  public static void setCustomKeyProvider(KeyProvider keyProvider) {
+    customKeyProvider = keyProvider;
   }
 
-  public static boolean isTestingOn() {
-    return testingOn.get();
+  public static KeyProvider getCustomKeyProvider() {
+    return customKeyProvider;
+  }
+
+  public static KeyProvider getKeyProvider() {
+    if (customKeyProvider != null) {
+      return customKeyProvider;
+    }
+    return defaultKeyProvider;
   }
 
   public static void initialize() throws NoSuchAlgorithmException {
     Security.setProperty("crypto.policy", "unlimited");
     getSecureRandom();
   }
-  
-  // made public for testing purposes
-  public static String getIndexUid(Path path) {
-    Iterator<Path> pathIterator = path.iterator();
-    while (pathIterator.hasNext()) {
-      if (pathIterator.next().equals(INDICES_PATH)) {
-        // next segment will contain the index UUID
-        return pathIterator.next().toString();
-      }
-    }
-    if (isTestingOn()) {
-      // during testing just use the grandparent dir name
-      // (so that tests that do renaming and copying would work)
-      return path.getParent().getParent().getFileName().toString();      
-    }
-    throw new IllegalArgumentException("Invalid path for encryption " + path.toString());
-  }
 
-  public static SecretKey getAesKey(Path path) { 
-    String indexUuid = getIndexUid(path);
-    if (isTestingOn()) {
-      // This is a mock implementation that will deterministically select a key
-      // from a pregenerated set of keys
-      return TEST_AES_KEYS.get(Math.abs(indexUuid.hashCode()) % TEST_AES_KEYS.size());
-    }
-    // TODO fetch company key from API instead
-    return TEST_AES_KEYS.get(Math.abs(indexUuid.hashCode()) % TEST_AES_KEYS.size());
+  public static SecretKey getAesKey(Path path) {
+    return getKeyProvider().getAesKey(path);
   }
 
   public static SecretKey generateAesKey() throws NoSuchAlgorithmException {
@@ -155,7 +121,7 @@ public final class Crypto {
 
   // ******************
   // Useful for testing
- 
+
   private static final String HEXES = "0123456789ABCDEF";
 
   private static String getHex(byte[] bytes) {
