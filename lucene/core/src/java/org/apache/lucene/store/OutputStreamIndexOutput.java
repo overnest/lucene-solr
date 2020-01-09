@@ -20,14 +20,11 @@ package org.apache.lucene.store;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.file.Path;
-import java.security.NoSuchAlgorithmException;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
 import javax.crypto.Cipher;
 
-import org.apache.lucene.util.crypto.Crypto;
 import org.apache.lucene.util.crypto.EncryptedFileChannel;
 
 /** Implementation class for buffered {@link IndexOutput} that writes to an {@link OutputStream}. */
@@ -46,29 +43,19 @@ public class OutputStreamIndexOutput extends IndexOutput {
    * @param bufferSize the buffer size in bytes used to buffer writes internally.
    * @throws IllegalArgumentException if the given buffer size is less or equal to <tt>0</tt>
    */
-  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize, boolean useEncryption, Path path) {
+  public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize, Cipher cipher) {
     super(resourceDescription, name);
      
     this.digest = new BufferedChecksum(new CRC32());
-    this.cipher = initCipher(useEncryption, path);
+    this.cipher = cipher;
     this.os = new BufferedOutputStream(out, bufferSize + (this.cipher != null ? EncryptedFileChannel.IV_LENGTH : 0));
   }
 
   public OutputStreamIndexOutput(String resourceDescription, String name, OutputStream out, int bufferSize) {
-    this(resourceDescription, name, out, bufferSize, false, null);
+    this(resourceDescription, name, out, bufferSize, null);
   }
 
-  private Cipher initCipher(boolean useEncryption, Path path) {
-    if (useEncryption && path != null && Crypto.isEncryptionOn()) {
-      try {
-        Crypto.initialize();
-        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(path), Crypto.generateAesIV());
-      } catch (IOException | NoSuchAlgorithmException e) {
-        return null;
-      }
-    }
-    return null;
-  }
+
   
   private final void ensureIv() throws IOException {
     if (ivWritten) {

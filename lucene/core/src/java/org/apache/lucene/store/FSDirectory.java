@@ -29,6 +29,7 @@ import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -41,8 +42,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import javax.crypto.Cipher;
+
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.crypto.Crypto;
 
 /**
  * Base class for Directory implementations that store index
@@ -264,7 +268,7 @@ public abstract class FSDirectory extends BaseDirectory {
       privateDeleteFile(name, true); // try again to delete it - this is best effort
       pendingDeletes.remove(name); // watch out - if the delete fails it put
     }
-    return new FSIndexOutput(name, useEncryption);
+    return new FSIndexOutput(name, initCipher(name));
   }
 
   @Override
@@ -277,12 +281,24 @@ public abstract class FSDirectory extends BaseDirectory {
         if (pendingDeletes.contains(name)) {
           continue;
         }
-        return new FSIndexOutput(name, useEncryption,
+        return new FSIndexOutput(name, initCipher(name),
                                  StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
       } catch (FileAlreadyExistsException faee) {
         // Retry with next incremented name
       }
     }
+  }
+  
+  private Cipher initCipher(String fileName) {
+    if (useEncryption && Crypto.isEncryptionOn()) {
+      try {
+        Crypto.initialize();
+        return Crypto.getCtrEncryptCipher(Crypto.getAesKey(directory.resolve(fileName)), Crypto.generateAesIV());
+      } catch (IOException | NoSuchAlgorithmException e) {
+        return null;
+      }
+    }
+    return null;
   }
 
   protected void ensureCanRead(String name) throws IOException {
@@ -414,12 +430,12 @@ public abstract class FSDirectory extends BaseDirectory {
      * a native buffer outside of stack if the write buffer size is larger.
      */
     static final int CHUNK_SIZE = 8192;
-    
-    public FSIndexOutput(String name, boolean useEncryption) throws IOException {
-      this(name, useEncryption, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+      
+    public FSIndexOutput(String name, Cipher cipher) throws IOException {
+      this(name, cipher, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
     }
 
-    FSIndexOutput(String name, boolean useEncryption, OpenOption... options) throws IOException {
+    FSIndexOutput(String name, Cipher cipher, OpenOption... options) throws IOException {
       super("FSIndexOutput(path=\"" + directory.resolve(name) + "\")", name, new FilterOutputStream(Files.newOutputStream(directory.resolve(name), options)) {
         // This implementation ensures, that we never write more than CHUNK_SIZE bytes:
         @Override
@@ -431,7 +447,7 @@ public abstract class FSDirectory extends BaseDirectory {
             offset += chunk;
           }
         }
-      }, CHUNK_SIZE, useEncryption, directory.resolve(name));
+      }, CHUNK_SIZE, cipher);
     }
   }
 
@@ -444,4 +460,5 @@ public abstract class FSDirectory extends BaseDirectory {
       return Collections.unmodifiableSet(new HashSet<>(pendingDeletes));
     }
   }
+
 }
